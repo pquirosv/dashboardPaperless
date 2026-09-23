@@ -7,28 +7,28 @@ Aplicación web local para explorar un informe de documentos y las coincidencias
 Requisitos: Docker Compose y los archivos locales que quieras consultar.
 
 ```bash
-cp .env.example .env
+cp config/.env.example config/.env
 ```
 
-Edita `.env` y sustituye las rutas de ejemplo por rutas del equipo que ejecutará Docker. Después:
+Edita `config/.env` y sustituye las rutas de ejemplo por rutas del equipo que ejecutará Docker. Después:
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose --env-file config/.env -f config/docker-compose.yml pull
+docker compose --env-file config/.env -f config/docker-compose.yml up -d
 ```
 
 Abre <http://localhost:8080>. Para comprobar el servicio:
 
 ```bash
-docker compose ps
-docker compose logs dashboard
+docker compose --env-file config/.env -f config/docker-compose.yml ps
+docker compose --env-file config/.env -f config/docker-compose.yml logs dashboard
 ```
 
-Para detenerlo, ejecuta `docker compose down`. Para actualizar la imagen, cambia `DASHBOARD_VERSION` en `.env` y repite `docker compose pull` y `docker compose up -d`.
+Para detenerlo, ejecuta `docker compose --env-file config/.env -f config/docker-compose.yml down`. Para actualizar la imagen, cambia `DASHBOARD_VERSION` en `config/.env` y repite `pull` y `up -d`.
 
 ## Configuración
 
-`docker-compose.yml` es el ejemplo recomendado y no contiene rutas del equipo, informes, credenciales ni datos de cliente. Todos los valores editables se definen en `.env`:
+[`config/docker-compose.yml`](config/docker-compose.yml) es el ejemplo recomendado y no contiene rutas del equipo, informes, credenciales ni datos de cliente. Todos los valores editables se definen en `config/.env`:
 
 ```dotenv
 DASHBOARD_IMAGE=ghcr.io/tu-organizacion/dashboard-documental
@@ -59,7 +59,7 @@ El informe, los documentos de origen y los documentos de referencia deben existi
 - `volumes`: conecta el informe y las carpetas locales en modo lectura.
 - `tmpfs`: ofrece espacio temporal efímero para el proceso.
 
-Si falta el TXT o no tiene el formato esperado, el contenedor termina y el motivo se muestra con `docker compose logs dashboard`.
+Si falta el TXT o no tiene el formato esperado, el contenedor termina y el motivo se muestra con `docker compose --env-file config/.env -f config/docker-compose.yml logs dashboard`.
 
 ## Formato del informe
 
@@ -107,7 +107,7 @@ npm start
 ## Privacidad y publicación
 
 - Los informes reales y sus rutas están excluidos por `.gitignore` y `.dockerignore`.
-- `.env` nunca debe subirse; usa `.env.example` como plantilla.
+- `config/.env` nunca debe subirse; usa `config/.env.example` como plantilla.
 - La imagen se construye sin incluir documentos locales.
 - La aplicación escucha por defecto solo en `127.0.0.1` y no proporciona autenticación.
 - El workflow de GitHub Actions ejecuta las pruebas y construye la imagen en cada cambio; al crear un tag `vX.Y.Z`, también la publica en GHCR.
