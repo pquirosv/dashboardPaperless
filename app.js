@@ -1,7 +1,6 @@
 const app = document.querySelector('#app');
 const number = new Intl.NumberFormat('es-MX');
 const pathSettingsKey = 'archivo-munet-path-settings';
-
 const state = {
   data: null,
   selectedFolder: null,
@@ -57,18 +56,28 @@ function savePathSettings(settings) {
   try {
     localStorage.setItem(pathSettingsKey, JSON.stringify(settings));
   } catch {
-    // La configuración se conserva durante esta sesión aunque no pueda persistirse.
+    // Las rutas siguen activas durante esta sesión aunque no puedan persistirse.
   }
 }
 
+async function configurePaths(settings) {
+  const response = await fetch('./api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings)
+  });
+  if (!response.ok) throw new Error('No se pudieron configurar las rutas en el servidor.');
+  return response.json();
+}
 function activePath(originalPath, originalRoot, configuredRoot) {
   if (!configuredRoot) return null;
   const relative = originalPath === originalRoot ? '' : originalPath.slice(`${originalRoot}/`.length);
   return relative ? `${configuredRoot}/${relative}` : configuredRoot;
 }
 
-function localFileUrl(path) {
-  return `file://${path.split('/').map(encodeURIComponent).join('/')}`;
+function servedFileUrl(originalPath, originalRoot, type) {
+  const relative = originalPath.slice(`${originalRoot}/`.length);
+  return `./files/${type}/${relative.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 function pathMarkup(originalPath, type) {
@@ -76,7 +85,7 @@ function pathMarkup(originalPath, type) {
   const configuredRoot = type === 'source' ? state.pathSettings?.sourceRoot : state.pathSettings?.backupRoot;
   const currentPath = activePath(originalPath, originalRoot, configuredRoot);
   if (!currentPath) return `<p class="path">${safe(originalPath)}</p>`;
-  return `<a class="path path-link" href="${safe(localFileUrl(currentPath))}" target="_blank" rel="noopener">${safe(currentPath)}</a>`;
+  return `<a class="path path-link" href="${safe(servedFileUrl(originalPath, originalRoot, type))}" target="_blank" rel="noopener">${safe(currentPath)}</a>`;
 }
 
 function allDocuments(folder) {
@@ -208,14 +217,14 @@ function render() {
     bindEvents();
     return;
   }
-  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark">AM</span><div><strong>ArchivoMunet</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard"><button class="app-tab ${state.view === 'archive' ? 'active' : ''}" data-view="archive">Archivo</button><button class="app-tab ${state.view === 'attributes' ? 'active' : ''}" data-view="attributes">Atributos Paperless</button></nav><button class="path-settings-button" data-edit-path-settings>Rutas de archivos</button></header>${state.view === 'attributes' ? `<main>${attributesView()}</main>` : archiveView}<footer>Fuente: ${safe(state.data.generatedFrom)} · Enlaces configurados para este navegador.</footer>`;
+  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark">AM</span><div><strong>ArchivoMunet</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard"><button class="app-tab ${state.view === 'archive' ? 'active' : ''}" data-view="archive">Archivo</button><button class="app-tab ${state.view === 'attributes' ? 'active' : ''}" data-view="attributes">Atributos Paperless</button></nav><button class="path-settings-button" data-edit-path-settings>Rutas de archivos</button></header>${state.view === 'attributes' ? `<main>${attributesView()}</main>` : archiveView}<footer>Fuente: ${safe(state.data.generatedFrom)} · Archivos servidos mediante HTTP.</footer>`;
   bindEvents();
 }
 
 function pathSettingsView() {
   const sourceRoot = state.pathSettings?.sourceRoot ?? '';
   const backupRoot = state.pathSettings?.backupRoot ?? '';
-  return `<main class="path-settings-page"><section class="path-settings-card"><span class="eyebrow">Configuración local</span><h1>¿Dónde están los archivos?</h1><p>Indica las rutas actuales para que el dashboard pueda abrir los PDFs de ArchivoMunet y Paperless en este equipo.</p><form id="path-settings-form" class="path-settings-form"><label>Carpeta raíz de ArchivoMunet<input name="sourceRoot" type="text" value="${safe(sourceRoot)}" placeholder="${safe(state.data.sourceRoot)}" autocomplete="off" /></label><label>Carpeta del respaldo de Paperless<input name="backupRoot" type="text" value="${safe(backupRoot)}" placeholder="${safe(state.data.backupRoot)}" autocomplete="off" /></label><div class="path-settings-actions"><button type="submit" class="primary-button">Guardar y abrir dashboard</button>${state.showingPathSettings ? '<button type="button" class="secondary-button" data-cancel-path-settings>Cancelar</button>' : '<button type="button" class="secondary-button" data-skip-path-settings>Continuar sin enlaces</button>'}</div></form><p class="path-settings-note">Las rutas se guardan solo en este navegador. Si los archivos no están en este equipo, puedes continuar sin enlaces y configurarlas más adelante.</p></section></main>`;
+  return `<main class="path-settings-page"><section class="path-settings-card"><span class="eyebrow">Configuración local</span><h1>¿Dónde están los archivos?</h1><p>Indica las rutas actuales para que el servidor pueda abrir los PDFs de ArchivoMunet y Paperless en este equipo.</p><form id="path-settings-form" class="path-settings-form"><label>Carpeta raíz de ArchivoMunet<input name="sourceRoot" type="text" value="${safe(sourceRoot)}" placeholder="${safe(state.data.sourceRoot)}" autocomplete="off" /></label><label>Carpeta del respaldo de Paperless<input name="backupRoot" type="text" value="${safe(backupRoot)}" placeholder="${safe(state.data.backupRoot)}" autocomplete="off" /></label><p id="path-settings-error" class="path-settings-note" role="alert"></p><div class="path-settings-actions"><button type="submit" class="primary-button">Guardar y abrir dashboard</button>${state.showingPathSettings ? '<button type="button" class="secondary-button" data-cancel-path-settings>Cancelar</button>' : ''}</div></form><p class="path-settings-note">Si dejas los campos vacíos se usarán las rutas mostradas. Si un archivo no existe, el enlace mostrará una explicación y podrás corregir estas rutas.</p></section></main>`;
 }
 
 function refocusSearch(position) {
@@ -231,7 +240,7 @@ function refocusAttributeSearch(position) {
 }
 
 function bindEvents() {
-  document.querySelector('#path-settings-form')?.addEventListener('submit', (event) => {
+  document.querySelector('#path-settings-form')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const sourceInput = event.currentTarget.elements.sourceRoot;
@@ -240,15 +249,16 @@ function bindEvents() {
       sourceRoot: normalizeRoot(formData.get('sourceRoot') || sourceInput.placeholder),
       backupRoot: normalizeRoot(formData.get('backupRoot') || backupInput.placeholder)
     };
-    state.pathSettings = settings;
-    state.showingPathSettings = false;
-    savePathSettings(settings);
-    render();
-  });
-  document.querySelector('[data-skip-path-settings]')?.addEventListener('click', () => {
-    state.pathSettings = { sourceRoot: '', backupRoot: '' };
-    state.showingPathSettings = false;
-    render();
+    const error = document.querySelector('#path-settings-error');
+    try {
+      await configurePaths(settings);
+      state.pathSettings = settings;
+      state.showingPathSettings = false;
+      savePathSettings(settings);
+      render();
+    } catch (failure) {
+      error.textContent = failure.message;
+    }
   });
   document.querySelector('[data-edit-path-settings]')?.addEventListener('click', () => { state.showingPathSettings = true; render(); });
   document.querySelector('[data-cancel-path-settings]')?.addEventListener('click', () => { state.showingPathSettings = false; render(); });
@@ -295,4 +305,13 @@ function bindEvents() {
   document.querySelector('[data-back-to-folder]')?.addEventListener('click', () => { state.selectedDocument = null; render(); });
 }
 
-fetch('./data/dashboard-data.json').then((response) => { if (!response.ok) throw new Error('No se pudo cargar el inventario.'); return response.json(); }).then((data) => { state.data = data; state.pathSettings = readPathSettings(); state.expandedFolders.add(data.tree.path); render(); }).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Ejecuta <code>npm run build</code> para generar los datos.</p></main>`; });
+fetch('./data/dashboard-data.json').then((response) => {
+  if (!response.ok) throw new Error('No se pudo cargar el inventario.');
+  return response.json();
+}).then(async (data) => {
+  state.data = data;
+  state.pathSettings = readPathSettings();
+  if (state.pathSettings) await configurePaths(state.pathSettings);
+  state.expandedFolders.add(data.tree.path);
+  render();
+}).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Ejecuta <code>npm run build</code> para generar los datos.</p></main>`; });

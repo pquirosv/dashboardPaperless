@@ -3,15 +3,22 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json ./
+COPY server.mjs ./
 COPY scripts ./scripts
 COPY data/inventory.txt ./data/
 
 RUN npm test
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM node:22-alpine
 
-COPY index.html app.js styles.css /usr/share/nginx/html/
-COPY --from=build /app/data /usr/share/nginx/html/data
+WORKDIR /app
 
-EXPOSE 80
+COPY index.html app.js styles.css server.mjs ./
+COPY --from=build /app/data/dashboard-data.json ./data/dashboard-data.json
+
+EXPOSE 4173
+
+ENV HOST=0.0.0.0
+
+CMD ["node", "server.mjs"]
