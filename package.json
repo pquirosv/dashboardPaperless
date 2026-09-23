@@ -1,0 +1,10 @@
+{
+  "name": "archivo-munet-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-data.mjs",
+    "test": "node --test scripts/build-data.test.mjs"
+  }
+}
