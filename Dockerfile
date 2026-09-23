@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package.json ./
 COPY scripts ./scripts
-COPY inventory.txt ./
+COPY data/inventory.txt ./data/
 
 RUN npm test
 RUN npm run build

@@ -2,6 +2,8 @@
 
 Dashboard estático para explorar el inventario de `ArchivoMunet` y las coincidencias registradas en el respaldo de Paperless.
 
+La fuente del inventario está en `data/inventory.txt`; el proceso de build genera `data/dashboard-data.json` a partir de ella.
+
 ## Uso local
 
 ```bash

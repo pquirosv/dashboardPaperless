@@ -2,7 +2,7 @@
 
 Este proyecto puede ejecutarse como una imagen Docker estática. La imagen hace dos cosas:
 
-1. Ejecuta los tests y genera `data/dashboard-data.json` desde `inventory.txt`.
+1. Ejecuta los tests y genera `data/dashboard-data.json` desde `data/inventory.txt`.
 2. Sirve `index.html`, `app.js`, `styles.css` y `data/` con Nginx.
 
 ## Construir la imagen
@@ -80,7 +80,7 @@ docker run --rm -p 8080:80 ghcr.io/TU_USUARIO/archivo-munet-dashboard:latest
 ## Archivos relevantes
 
 - `Dockerfile`: define la imagen.
-- `inventory.txt`: fuente del inventario.
+- `data/inventory.txt`: fuente del inventario.
 - `scripts/build-data.mjs`: genera `data/dashboard-data.json`.
 - `scripts/build-data.test.mjs`: valida el parser del inventario.
 - `data/dashboard-data.json`: datos generados para el dashboard.
