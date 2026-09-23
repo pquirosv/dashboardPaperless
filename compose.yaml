@@ -1,8 +1,8 @@
 services:
   dashboard:
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/dashboardpaperless}:${DASHBOARD_VERSION:-v1.0.1}"
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/dashboardpaperless}:${DASHBOARD_VERSION:-v1.0.2}"
     init: true
-    restart: unless-stopped
+    restart: on-failure:3
     read_only: true
     cap_drop:
       - ALL

@@ -15,7 +15,7 @@ Completa `.env` con rutas absolutas del host:
 
 ```dotenv
 DASHBOARD_IMAGE=ghcr.io/pquirosv/dashboardpaperless
-DASHBOARD_VERSION=v1.0.1
+DASHBOARD_VERSION=v1.0.2
 DASHBOARD_PORT=8080
 INVENTORY_FILE_HOST=/ruta/al/informe.txt
 SOURCE_DIRECTORY_HOST=/ruta/a/los/documentos/origen
@@ -42,6 +42,8 @@ Comprueba el estado:
 docker compose ps
 docker compose logs dashboard
 ```
+
+Si falta el TXT, el contenedor termina después de tres intentos y el motivo queda visible en los logs. Una vez colocado el informe en la ruta de `INVENTORY_FILE_HOST`, arráncalo de nuevo con `docker compose up -d`.
 
 Abre `http://localhost:8080`.
 

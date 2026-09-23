@@ -57,5 +57,11 @@ test('serves inventory, health and mounted files without mutable configuration',
 });
 
 test('fails to load an inventory that does not exist', async () => {
-  await assert.rejects(loadInventory({ inventoryFile: '/definitely/missing/inventory.txt' }), /ENOENT/);
+  await assert.rejects(loadInventory({ inventoryFile: '/definitely/missing/inventory.txt' }), /No existe INVENTORY_FILE/);
+});
+
+test('rejects a mounted directory in place of the inventory file', async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'document-dashboard-directory-'));
+  await assert.rejects(loadInventory({ inventoryFile: temporaryRoot }), /no es un archivo/);
+  await rm(temporaryRoot, { recursive: true, force: true });
 });

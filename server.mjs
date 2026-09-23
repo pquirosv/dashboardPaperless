@@ -79,7 +79,20 @@ async function sendFile(request, response, filePath, contentType, friendlyError 
 
 export async function loadInventory(options = {}) {
   const inventoryFile = options.inventoryFile || process.env.INVENTORY_FILE || '/input/inventory.txt';
-  const input = await readFile(inventoryFile, 'utf8');
+  let details;
+  try {
+    details = await stat(inventoryFile);
+  } catch (error) {
+    if (error.code === 'ENOENT') throw new Error(`No existe INVENTORY_FILE: ${inventoryFile}`);
+    throw new Error(`No se puede acceder a INVENTORY_FILE (${inventoryFile}): ${error.message}`);
+  }
+  if (!details.isFile()) throw new Error(`INVENTORY_FILE no es un archivo: ${inventoryFile}`);
+  let input;
+  try {
+    input = await readFile(inventoryFile, 'utf8');
+  } catch (error) {
+    throw new Error(`No se puede leer INVENTORY_FILE (${inventoryFile}): ${error.message}`);
+  }
   return parseInventory(input, {
     generatedFrom: path.basename(inventoryFile),
     appTitle: options.appTitle || process.env.APP_TITLE,
