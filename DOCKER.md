@@ -14,7 +14,7 @@ El informe TXT y las dos carpetas documentales ya deben existir en ese equipo.
 Completa `.env` con rutas absolutas del host:
 
 ```dotenv
-DASHBOARD_IMAGE=ghcr.io/pquirosv/paperlessmunet
+DASHBOARD_IMAGE=ghcr.io/pquirosv/dashboardmunet
 DASHBOARD_VERSION=v1.0.0
 DASHBOARD_PORT=8080
 INVENTORY_FILE_HOST=/ruta/al/informe.txt

@@ -1,6 +1,6 @@
 services:
   dashboard:
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/paperlessmunet}:${DASHBOARD_VERSION:-v1.0.0}"
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/dashboardmunet}:${DASHBOARD_VERSION:-v1.0.0}"
     init: true
     restart: unless-stopped
     read_only: true
