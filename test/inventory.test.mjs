@@ -24,7 +24,7 @@ test('keeps optional reference attributes and unicode paths', () => {
 
 test('rejects empty and structurally invalid reports', () => {
   assert.throws(() => parseInventory(''), /vacío/);
-  assert.throws(() => parseInventory('Carpeta origen ArchivoMunet:\n/solo/una/ruta'), /Backup de Paperless/);
+  assert.throws(() => parseInventory('Carpeta origen:\n/solo/una/ruta'), /cabecera de documentos relacionados/);
 });
 
 test('rejects document paths outside the roots declared by the report', () => {

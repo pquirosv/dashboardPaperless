@@ -8,6 +8,4 @@ data
 **/desglose-documentos*.txt
 node_modules
 npm-debug.log
-DOCKER.md
 README.md
-compose.yaml

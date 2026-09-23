@@ -2,23 +2,23 @@ import path from 'node:path';
 
 const clean = (value) => value.trim();
 
-function pathAfterHeading(lines, heading) {
-  const headingIndex = lines.findIndex((line) => line.trim() === heading);
-  if (headingIndex === -1) throw new Error(`Falta la cabecera obligatoria: ${heading}`);
+function pathAfterHeading(lines, headingPattern, headingDescription) {
+  const headingIndex = lines.findIndex((line) => headingPattern.test(line.trim()));
+  if (headingIndex === -1) throw new Error(`Falta la cabecera obligatoria: ${headingDescription}`);
   const value = lines.slice(headingIndex + 1).find((line) => line.trim());
-  if (!value || !path.isAbsolute(value.trim())) throw new Error(`La ruta indicada después de "${heading}" no es absoluta.`);
+  if (!value || !path.isAbsolute(value.trim())) throw new Error(`La ruta indicada después de "${headingDescription}" no es absoluta.`);
   return value.trim().replace(/\/+$/, '');
 }
 
-function sectionRange(lines, startHeading, endHeading) {
-  const start = lines.findIndex((line) => line.trim() === startHeading);
-  const end = lines.findIndex((line, index) => index > start && line.trim() === endHeading);
-  if (start === -1 || end === -1) throw new Error(`El informe no contiene las secciones esperadas: ${startHeading} / ${endHeading}`);
+function sectionRange(lines, startPattern, endPattern, description) {
+  const start = lines.findIndex((line) => startPattern.test(line.trim()));
+  const end = lines.findIndex((line, index) => index > start && endPattern.test(line.trim()));
+  if (start === -1 || end === -1) throw new Error(`El informe no contiene la sección esperada: ${description}`);
   return { start, end };
 }
 
-function parseAttributes(lines, startIndex) {
-  const record = { path: clean(lines[startIndex].slice('PAPERLESS:'.length)) };
+function parseAttributes(lines, startIndex, referencePrefix) {
+  const record = { path: clean(lines[startIndex].slice(referencePrefix.length)) };
   let cursor = startIndex + 1;
   while (cursor < lines.length && /^   (TÍTULO|ETIQUETAS|CORRESPONSAL|TIPO DOCUMENTAL|RUTA DE ALMACENAMIENTO|ESTADO):/.test(lines[cursor])) {
     const line = lines[cursor].trim();
@@ -43,9 +43,9 @@ function relationForHeading(line, current) {
   return current;
 }
 
-function parseMatchedGroups(lines) {
-  const start = lines.findIndex((line) => line.trim() === 'DOCUMENTOS DE ARCHIVOMUNET QUE SÍ ESTÁN EN PAPERLESS');
-  const end = lines.findIndex((line, index) => index > start && line.trim() === 'DOCUMENTOS DEL MANIFEST SIN PDF ORIGINAL EN EL BACKUP');
+function parseMatchedGroups(lines, format) {
+  const start = lines.findIndex((line) => line.trim() === format.matchedHeading);
+  const end = lines.findIndex((line, index) => index > start && line.trim() === format.manifestHeading);
   if (start === -1 || end === -1) throw new Error('El informe no contiene la sección completa de documentos relacionados.');
   const groups = [];
   let relation = null;
@@ -65,18 +65,18 @@ function parseMatchedGroups(lines) {
       pendingLabel = groupLabel[1];
       continue;
     }
-    if (line.startsWith('ARCHIVOMUNET:')) {
+    if (line.startsWith(format.sourcePrefix)) {
       if (group?.paperless.length) finish();
       if (!group) {
         group = { id: `group-${groups.length + 1}`, label: pendingLabel, relation, sourcePaths: [], paperless: [] };
         pendingLabel = null;
       }
-      group.sourcePaths.push(clean(line.slice('ARCHIVOMUNET:'.length)));
+      group.sourcePaths.push(clean(line.slice(format.sourcePrefix.length)));
       continue;
     }
-    if (line.startsWith('PAPERLESS:')) {
+    if (line.startsWith(format.referencePrefix)) {
       if (!group) continue;
-      const { record, nextIndex } = parseAttributes(lines, index);
+      const { record, nextIndex } = parseAttributes(lines, index, format.referencePrefix);
       group.paperless.push(record);
       index = nextIndex - 1;
     }
@@ -85,9 +85,28 @@ function parseMatchedGroups(lines) {
   return groups;
 }
 
-function parseUnmatched(lines, sourceRoot) {
-  const { start, end } = sectionRange(lines, 'DOCUMENTOS DE ARCHIVOMUNET QUE NO SE ENCONTRARON EN PAPERLESS', 'NOMBRES PDF DUPLICADOS EN ARCHIVO MUNET');
+function parseUnmatched(lines, sourceRoot, format) {
+  const { start, end } = sectionRange(lines, new RegExp(`^${escapeRegExp(format.unmatchedHeading)}$`), /^NOMBRES PDF DUPLICADOS EN .+$/, 'documentos sin coincidencia');
   return lines.slice(start + 1, end).map(clean).filter((line) => line.startsWith(`${sourceRoot}/`));
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function detectFormat(lines) {
+  const matchedLine = lines.find((line) => /^DOCUMENTOS DE .+ QUE SÍ ESTÁN EN .+$/.test(line.trim()))?.trim();
+  const matched = matchedLine?.match(/^DOCUMENTOS DE (.+) QUE SÍ ESTÁN EN (.+)$/);
+  if (!matched) throw new Error('El informe no contiene la cabecera de documentos relacionados.');
+  const sourceName = matched[1];
+  const referenceName = matched[2];
+  return {
+    sourcePrefix: `${sourceName}:`,
+    referencePrefix: `${referenceName}:`,
+    matchedHeading: matchedLine,
+    unmatchedHeading: `DOCUMENTOS DE ${sourceName} QUE NO SE ENCONTRARON EN ${referenceName}`,
+    manifestHeading: 'DOCUMENTOS DEL MANIFEST SIN PDF ORIGINAL EN EL BACKUP'
+  };
 }
 
 function createTree(documents, sourceRoot, sourceLabel) {
@@ -131,13 +150,14 @@ function createTree(documents, sourceRoot, sourceLabel) {
 export function parseInventory(input, options = {}) {
   if (typeof input !== 'string' || !input.trim()) throw new Error('El informe está vacío.');
   const lines = input.replace(/\r/g, '').split('\n');
-  const sourceRoot = pathAfterHeading(lines, 'Carpeta origen ArchivoMunet:');
-  const backupRoot = pathAfterHeading(lines, 'Backup de Paperless:');
+  const format = detectFormat(lines);
+  const sourceRoot = pathAfterHeading(lines, /^Carpeta origen(?: [^:]+)?:$/, 'la carpeta de origen');
+  const backupRoot = pathAfterHeading(lines, /^Backup de .+:$/, 'la carpeta de referencia');
   const sourceLabel = options.sourceLabel || 'Documentos de origen';
-  const matchedGroups = parseMatchedGroups(lines);
+  const matchedGroups = parseMatchedGroups(lines, format);
   const documents = new Map();
 
-  for (const sourcePath of parseUnmatched(lines, sourceRoot)) {
+  for (const sourcePath of parseUnmatched(lines, sourceRoot, format)) {
     documents.set(sourcePath, { id: `doc-${documents.size + 1}`, sourcePath, found: false, ambiguous: false, relation: 'sin coincidencia', matches: [] });
   }
   for (const group of matchedGroups) {

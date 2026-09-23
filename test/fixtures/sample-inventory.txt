@@ -1,35 +1,35 @@
 ============================================================
-DESGLOSE DOCUMENTOS ARCHIVOMUNET / PAPERLESS
+DESGLOSE DOCUMENTOS ORIGEN / REFERENCIA
 ============================================================
 
-Carpeta origen ArchivoMunet:
+Carpeta origen:
   /datos/origen
 
-Backup de Paperless:
+Backup de referencia:
   /datos/referencia
 
-DOCUMENTOS DE ARCHIVOMUNET QUE NO SE ENCONTRARON EN PAPERLESS
+DOCUMENTOS DE ORIGEN QUE NO SE ENCONTRARON EN REFERENCIA
 /datos/origen/Carpeta Única/sin coincidencia.pdf
-NOMBRES PDF DUPLICADOS EN ARCHIVO MUNET
+NOMBRES PDF DUPLICADOS EN ORIGEN
 
-DOCUMENTOS DE ARCHIVOMUNET QUE SÍ ESTÁN EN PAPERLESS
+DOCUMENTOS DE ORIGEN QUE SÍ ESTÁN EN REFERENCIA
 RELACIÓN VARIOS A VARIOS — MISMO NÚMERO
 2 A 2
 agrupados.pdf (2 Origen / 2 Referencia)
-ARCHIVOMUNET: /datos/origen/Grupo/documento uno.pdf
-ARCHIVOMUNET: /datos/origen/Grupo/documento dos.pdf
-PAPERLESS: /datos/referencia/originales/referencia uno.pdf
+ORIGEN: /datos/origen/Grupo/documento uno.pdf
+ORIGEN: /datos/origen/Grupo/documento dos.pdf
+REFERENCIA: /datos/referencia/originales/referencia uno.pdf
    TÍTULO: Referencia uno
    ETIQUETAS: contrato; ejemplo
    CORRESPONSAL: Empresa ficticia
    TIPO DOCUMENTAL: Contrato
    RUTA DE ALMACENAMIENTO: Ficticia | Contratos
    ESTADO: disponible
-PAPERLESS: /datos/referencia/originales/referencia dos.pdf
+REFERENCIA: /datos/referencia/originales/referencia dos.pdf
    TÍTULO: Referencia dos
    ETIQUETAS: ejemplo
 RELACIÓN 1 A 1
-ARCHIVOMUNET: /datos/origen/Individual/documento tres.pdf
-PAPERLESS: /datos/referencia/originales/referencia tres.pdf
+ORIGEN: /datos/origen/Individual/documento tres.pdf
+REFERENCIA: /datos/referencia/originales/referencia tres.pdf
    TÍTULO: Referencia tres
 DOCUMENTOS DEL MANIFEST SIN PDF ORIGINAL EN EL BACKUP
