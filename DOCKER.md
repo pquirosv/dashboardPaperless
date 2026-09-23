@@ -14,13 +14,13 @@ El informe TXT y las dos carpetas documentales ya deben existir en ese equipo.
 Completa `.env` con rutas absolutas del host:
 
 ```dotenv
-DASHBOARD_IMAGE=ghcr.io/pquirosv/dashboardmunet
-DASHBOARD_VERSION=v1.0.0
+DASHBOARD_IMAGE=ghcr.io/pquirosv/dashboardpaperless
+DASHBOARD_VERSION=v1.0.1
 DASHBOARD_PORT=8080
 INVENTORY_FILE_HOST=/ruta/al/informe.txt
 SOURCE_DIRECTORY_HOST=/ruta/a/los/documentos/origen
 BACKUP_DIRECTORY_HOST=/ruta/a/los/documentos/referencia
-APP_TITLE=Dashboard documental
+APP_TITLE=Dashboard Paperless
 SOURCE_LABEL=Documentos de origen
 BACKUP_LABEL=Repositorio de referencia
 ```
@@ -68,8 +68,8 @@ La imagen ejecuta como usuario sin privilegios, usa un filesystem raíz de solo 
 El workflow `.github/workflows/publish-container.yml` valida cada cambio. Al subir un tag semántico construye y publica en GHCR para AMD64 y ARM64:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 Después de la primera publicación, abre la configuración del paquete en GitHub y cambia su visibilidad a **Public**. Verifica la descarga anónima desde una sesión sin credenciales antes de distribuir el Compose.

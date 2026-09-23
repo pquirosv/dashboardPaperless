@@ -1,4 +1,4 @@
-# Dashboard documental
+# Dashboard Paperless
 
 Dashboard web para explorar un inventario de documentos y las coincidencias registradas en un repositorio de referencia. La aplicación está diseñada para ejecutarse en Docker sin incorporar datos reales a la imagen.
 

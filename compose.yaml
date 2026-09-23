@@ -1,6 +1,6 @@
 services:
   dashboard:
-    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/dashboardmunet}:${DASHBOARD_VERSION:-v1.0.0}"
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/dashboardpaperless}:${DASHBOARD_VERSION:-v1.0.1}"
     init: true
     restart: unless-stopped
     read_only: true
@@ -9,7 +9,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      APP_TITLE: "${APP_TITLE:-Dashboard documental}"
+      APP_TITLE: "${APP_TITLE:-Dashboard Paperless}"
       SOURCE_LABEL: "${SOURCE_LABEL:-Documentos de origen}"
       BACKUP_LABEL: "${BACKUP_LABEL:-Repositorio de referencia}"
       INVENTORY_FILE: /input/inventory.txt

@@ -1,6 +1,6 @@
 {
-  "name": "document-inventory-dashboard",
-  "version": "1.0.0",
+  "name": "dashboard-paperless",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {

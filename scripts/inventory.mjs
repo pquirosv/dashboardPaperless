@@ -175,7 +175,7 @@ export function parseInventory(input, options = {}) {
     backupRoot,
     generatedFrom: options.generatedFrom || 'Informe local montado',
     display: {
-      appTitle: options.appTitle || 'Dashboard documental',
+      appTitle: options.appTitle || 'Dashboard Paperless',
       sourceLabel,
       backupLabel: options.backupLabel || 'Repositorio de referencia'
     },
