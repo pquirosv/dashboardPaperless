@@ -1,6 +1,5 @@
 const app = document.querySelector('#app');
 const number = new Intl.NumberFormat('es-MX');
-const pathSettingsKey = 'archivo-munet-path-settings';
 const state = {
   data: null,
   selectedFolder: null,
@@ -12,9 +11,7 @@ const state = {
   view: 'archive',
   expandedAttributeTypes: new Set(),
   selectedAttribute: null,
-  attributeQuery: '',
-  pathSettings: null,
-  showingPathSettings: false
+  attributeQuery: ''
 };
 
 const fieldLabels = {
@@ -40,40 +37,6 @@ const pathName = (sourcePath) => sourcePath.split('/').filter(Boolean).at(-1);
 const relativePath = (sourcePath) => sourcePath.replace(`${state.data.sourceRoot}/`, '');
 const valueLines = (value) => String(value).split(' | ').map((part) => part.trim()).filter(Boolean);
 const linedValue = (value) => `<span class="attribute-lines">${valueLines(value).map((part) => `<span>${safe(part)}</span>`).join('')}</span>`;
-const normalizeRoot = (path) => path.trim().replace(/\/+$/, '');
-
-function readPathSettings() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(pathSettingsKey));
-    if (saved?.sourceRoot && saved?.backupRoot) return saved;
-  } catch {
-    // El dashboard puede seguir funcionando si el navegador no permite almacenamiento local.
-  }
-  return null;
-}
-
-function savePathSettings(settings) {
-  try {
-    localStorage.setItem(pathSettingsKey, JSON.stringify(settings));
-  } catch {
-    // Las rutas siguen activas durante esta sesión aunque no puedan persistirse.
-  }
-}
-
-async function configurePaths(settings) {
-  const response = await fetch('./api/config', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(settings)
-  });
-  if (!response.ok) throw new Error('No se pudieron configurar las rutas en el servidor.');
-  return response.json();
-}
-function activePath(originalPath, originalRoot, configuredRoot) {
-  if (!configuredRoot) return null;
-  const relative = originalPath === originalRoot ? '' : originalPath.slice(`${originalRoot}/`.length);
-  return relative ? `${configuredRoot}/${relative}` : configuredRoot;
-}
 
 function servedFileUrl(originalPath, originalRoot, type) {
   const relative = originalPath.slice(`${originalRoot}/`.length);
@@ -82,10 +45,7 @@ function servedFileUrl(originalPath, originalRoot, type) {
 
 function pathMarkup(originalPath, type) {
   const originalRoot = type === 'source' ? state.data.sourceRoot : state.data.backupRoot;
-  const configuredRoot = type === 'source' ? state.pathSettings?.sourceRoot : state.pathSettings?.backupRoot;
-  const currentPath = activePath(originalPath, originalRoot, configuredRoot);
-  if (!currentPath) return `<p class="path">${safe(originalPath)}</p>`;
-  return `<a class="path path-link" href="${safe(servedFileUrl(originalPath, originalRoot, type))}" target="_blank" rel="noopener">${safe(currentPath)}</a>`;
+  return `<a class="path path-link" href="${safe(servedFileUrl(originalPath, originalRoot, type))}" target="_blank" rel="noopener">${safe(originalPath)}</a>`;
 }
 
 function allDocuments(folder) {
@@ -123,7 +83,7 @@ function paperlessFileTotal() {
 
 function attributeFilesMarkup(group) {
   const files = [...group.files.values()].sort((left, right) => left.path.localeCompare(right.path, 'es'));
-  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de Paperless</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small>${safe(file.path)}</small>${file.references > 1 ? `<span>${file.references} referencias</span>` : ''}</article>`).join('')}</div>`;
+  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de ${safe(state.data.display.backupLabel)}</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small>${safe(file.path)}</small>${file.references > 1 ? `<span>${file.references} referencias</span>` : ''}</article>`).join('')}</div>`;
 }
 
 function matchesAttributeQuery(group) {
@@ -134,7 +94,7 @@ function matchesAttributeQuery(group) {
 
 function attributesView() {
   const groupsByType = new Map(attributeDefinitions.map((definition) => [definition.key, attributeGroups(definition)]));
-  return `<section class="attributes-panel"><div class="attributes-heading"><div><span class="eyebrow">Inventario Paperless</span><h1>Atributos y archivos</h1><p>Explora los valores registrados y consulta todos los archivos asociados a cada atributo.</p><label class="search attributes-search"><span>⌕</span><input id="attribute-search" type="search" placeholder="Buscar nombre de atributo" value="${safe(state.attributeQuery)}" /></label></div><span class="attributes-total">${number.format(paperlessFileTotal())} archivos Paperless relacionados</span></div><div class="attribute-groups">${attributeDefinitions.map((definition) => {
+  return `<section class="attributes-panel"><div class="attributes-heading"><div><span class="eyebrow">Inventario de referencia</span><h1>Atributos y archivos</h1><p>Explora los valores registrados y consulta todos los archivos asociados a cada atributo.</p><label class="search attributes-search"><span>⌕</span><input id="attribute-search" type="search" placeholder="Buscar nombre de atributo" value="${safe(state.attributeQuery)}" /></label></div><span class="attributes-total">${number.format(paperlessFileTotal())} archivos relacionados</span></div><div class="attribute-groups">${attributeDefinitions.map((definition) => {
     const allGroups = groupsByType.get(definition.key);
     const groups = allGroups.filter(matchesAttributeQuery);
     const isExpanded = state.expandedAttributeTypes.has(definition.key);
@@ -174,14 +134,14 @@ function detailsMarkup(match) {
 function documentDetail(document) {
   const matches = document.matches.length ? document.matches.map((match, index) => `
     <article class="match-card">
-      <div class="match-heading"><span>Archivo Paperless ${document.matches.length > 1 ? index + 1 : ''}</span><strong>${safe(pathName(match.path))}</strong></div>
+      <div class="match-heading"><span>${safe(state.data.display.backupLabel)} ${document.matches.length > 1 ? index + 1 : ''}</span><strong>${safe(pathName(match.path))}</strong></div>
       ${pathMarkup(match.path, 'backup')}
       ${detailsMarkup(match)}
-    </article>`).join('') : '<div class="empty-state"><strong>No hay una coincidencia en Paperless.</strong><span>Este PDF forma parte de los 141 documentos de ArchivoMunet sin equivalencia en el backup.</span></div>';
+    </article>`).join('') : `<div class="empty-state"><strong>No hay una coincidencia en el repositorio de referencia.</strong><span>Este PDF forma parte de los ${number.format(state.data.summary.missing)} documentos sin equivalencia.</span></div>`;
   return `<section class="detail-panel">
     <button class="back-button" data-back-to-folder>← Volver a ${safe(selectedFolder().name)}</button>
-    <div class="detail-title"><div><span class="eyebrow">Documento ArchivoMunet</span><h2>${safe(pathName(document.sourcePath))}</h2>${pathMarkup(document.sourcePath, 'source')}</div>${statusChip(document)}</div>
-    ${document.ambiguous ? `<p class="notice">Esta relación se registró como <strong>${safe(document.relation)}</strong>. Se muestran todos los candidatos Paperless para evitar una asignación arbitraria.</p>` : ''}
+    <div class="detail-title"><div><span class="eyebrow">${safe(state.data.display.sourceLabel)}</span><h2>${safe(pathName(document.sourcePath))}</h2>${pathMarkup(document.sourcePath, 'source')}</div>${statusChip(document)}</div>
+    ${document.ambiguous ? `<p class="notice">Esta relación se registró como <strong>${safe(document.relation)}</strong>. Se muestran todos los candidatos para evitar una asignación arbitraria.</p>` : ''}
     <div class="match-grid">${matches}</div>
   </section>`;
 }
@@ -198,10 +158,10 @@ function documentList(folder) {
   const pages = Math.max(1, Math.ceil(documents.length / pageSize));
   state.page = Math.min(state.page, pages);
   const pageDocuments = documents.slice((state.page - 1) * pageSize, state.page * pageSize);
-  const breadcrumb = folder.path.replace(state.data.sourceRoot, 'ArchivoMunet');
+  const breadcrumb = folder.path.replace(state.data.sourceRoot, state.data.display.sourceLabel);
   return `<section class="content-panel">
     <div class="folder-heading"><div><span class="eyebrow">Carpeta seleccionada</span><h2>${safe(folder.name)}</h2><p>${safe(breadcrumb)}</p></div><div class="folder-stats"><span>${number.format(folder.stats.documents)} PDFs</span><span>${number.format(folder.stats.found)} encontrados</span></div></div>
-    <div class="results-bar"><strong>${number.format(documents.length)} documentos visibles</strong><span>Selecciona un PDF para ver las coincidencias y metadatos de Paperless.</span></div>
+    <div class="results-bar"><strong>${number.format(documents.length)} documentos visibles</strong><span>Selecciona un PDF para ver sus coincidencias y metadatos.</span></div>
     <div class="document-list">${pageDocuments.map(documentRow).join('') || '<div class="empty-state">No hay documentos que coincidan con la búsqueda o los filtros.</div>'}</div>
     ${pages > 1 ? `<nav class="pagination"><button data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>Anterior</button><span>Página ${state.page} de ${pages}</span><button data-page="${state.page + 1}" ${state.page === pages ? 'disabled' : ''}>Siguiente</button></nav>` : ''}
   </section>`;
@@ -212,19 +172,8 @@ function render() {
   const archiveView = `<main>
     <section class="workspace"><aside class="sidebar"><div class="sidebar-top"><span class="eyebrow">Navegador</span><label class="search sidebar-search"><span>⌕</span><input id="search" type="search" placeholder="Buscar archivo, etiqueta o corresponsal" value="${safe(state.query)}" /></label></div><div class="filter-set"><button class="filter ${state.filter === 'all' ? 'active' : ''}" data-filter="all">Todos <span>${number.format(summary.total)}</span></button><button class="filter ${state.filter === 'found' ? 'active' : ''}" data-filter="found">Encontrados <span>${number.format(summary.found)}</span></button><button class="filter ${state.filter === 'missing' ? 'active' : ''}" data-filter="missing">Sin coincidencia <span>${number.format(summary.missing)}</span></button><button class="filter ${state.filter === 'ambiguous' ? 'active' : ''}" data-filter="ambiguous">Agrupados <span>${number.format(summary.ambiguous)}</span></button></div><nav class="tree">${folderMarkup(tree)}</nav></aside><div class="main-view">${state.selectedDocument ? documentDetail(state.selectedDocument) : documentList(selectedFolder())}</div></section>
   </main>`;
-  if (state.showingPathSettings || !state.pathSettings) {
-    app.innerHTML = pathSettingsView();
-    bindEvents();
-    return;
-  }
-  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark">AM</span><div><strong>ArchivoMunet</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard"><button class="app-tab ${state.view === 'archive' ? 'active' : ''}" data-view="archive">Archivo</button><button class="app-tab ${state.view === 'attributes' ? 'active' : ''}" data-view="attributes">Atributos Paperless</button></nav><button class="path-settings-button" data-edit-path-settings>Rutas de archivos</button></header>${state.view === 'attributes' ? `<main>${attributesView()}</main>` : archiveView}<footer>Fuente: ${safe(state.data.generatedFrom)} · Archivos servidos mediante HTTP.</footer>`;
+  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark">DD</span><div><strong>${safe(state.data.display.appTitle)}</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard"><button class="app-tab ${state.view === 'archive' ? 'active' : ''}" data-view="archive">Documentos</button><button class="app-tab ${state.view === 'attributes' ? 'active' : ''}" data-view="attributes">Atributos</button></nav></header>${state.view === 'attributes' ? `<main>${attributesView()}</main>` : archiveView}<footer>Fuente: ${safe(state.data.generatedFrom)} · Archivos servidos mediante HTTP.</footer>`;
   bindEvents();
-}
-
-function pathSettingsView() {
-  const sourceRoot = state.pathSettings?.sourceRoot ?? '';
-  const backupRoot = state.pathSettings?.backupRoot ?? '';
-  return `<main class="path-settings-page"><section class="path-settings-card"><span class="eyebrow">Configuración local</span><h1>¿Dónde están los archivos?</h1><p>Indica las rutas actuales para que el servidor pueda abrir los PDFs de ArchivoMunet y Paperless en este equipo.</p><form id="path-settings-form" class="path-settings-form"><label>Carpeta raíz de ArchivoMunet<input name="sourceRoot" type="text" value="${safe(sourceRoot)}" placeholder="${safe(state.data.sourceRoot)}" autocomplete="off" /></label><label>Carpeta del respaldo de Paperless<input name="backupRoot" type="text" value="${safe(backupRoot)}" placeholder="${safe(state.data.backupRoot)}" autocomplete="off" /></label><p id="path-settings-error" class="path-settings-note" role="alert"></p><div class="path-settings-actions"><button type="submit" class="primary-button">Guardar y abrir dashboard</button>${state.showingPathSettings ? '<button type="button" class="secondary-button" data-cancel-path-settings>Cancelar</button>' : ''}</div></form><p class="path-settings-note">Si dejas los campos vacíos se usarán las rutas mostradas. Si un archivo no existe, el enlace mostrará una explicación y podrás corregir estas rutas.</p></section></main>`;
 }
 
 function refocusSearch(position) {
@@ -240,28 +189,6 @@ function refocusAttributeSearch(position) {
 }
 
 function bindEvents() {
-  document.querySelector('#path-settings-form')?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const sourceInput = event.currentTarget.elements.sourceRoot;
-    const backupInput = event.currentTarget.elements.backupRoot;
-    const settings = {
-      sourceRoot: normalizeRoot(formData.get('sourceRoot') || sourceInput.placeholder),
-      backupRoot: normalizeRoot(formData.get('backupRoot') || backupInput.placeholder)
-    };
-    const error = document.querySelector('#path-settings-error');
-    try {
-      await configurePaths(settings);
-      state.pathSettings = settings;
-      state.showingPathSettings = false;
-      savePathSettings(settings);
-      render();
-    } catch (failure) {
-      error.textContent = failure.message;
-    }
-  });
-  document.querySelector('[data-edit-path-settings]')?.addEventListener('click', () => { state.showingPathSettings = true; render(); });
-  document.querySelector('[data-cancel-path-settings]')?.addEventListener('click', () => { state.showingPathSettings = false; render(); });
   document.querySelector('#search')?.addEventListener('input', (event) => {
     const position = event.target.selectionStart ?? event.target.value.length;
     state.query = event.target.value;
@@ -305,13 +232,11 @@ function bindEvents() {
   document.querySelector('[data-back-to-folder]')?.addEventListener('click', () => { state.selectedDocument = null; render(); });
 }
 
-fetch('./data/dashboard-data.json').then((response) => {
+fetch('./api/inventory').then((response) => {
   if (!response.ok) throw new Error('No se pudo cargar el inventario.');
   return response.json();
-}).then(async (data) => {
+}).then((data) => {
   state.data = data;
-  state.pathSettings = readPathSettings();
-  if (state.pathSettings) await configurePaths(state.pathSettings);
   state.expandedFolders.add(data.tree.path);
   render();
-}).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Ejecuta <code>npm run build</code> para generar los datos.</p></main>`; });
+}).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Comprueba el informe montado y reinicia el contenedor.</p></main>`; });

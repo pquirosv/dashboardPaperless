@@ -1,0 +1,34 @@
+services:
+  dashboard:
+    image: "${DASHBOARD_IMAGE:-ghcr.io/pquirosv/paperlessmunet}:${DASHBOARD_VERSION:-v1.0.0}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      APP_TITLE: "${APP_TITLE:-Dashboard documental}"
+      SOURCE_LABEL: "${SOURCE_LABEL:-Documentos de origen}"
+      BACKUP_LABEL: "${BACKUP_LABEL:-Repositorio de referencia}"
+      INVENTORY_FILE: /input/inventory.txt
+      SOURCE_FILES_ROOT: /documents/source
+      BACKUP_FILES_ROOT: /documents/backup
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:4173"
+    volumes:
+      - type: bind
+        source: "${INVENTORY_FILE_HOST:?Define INVENTORY_FILE_HOST en .env}"
+        target: /input/inventory.txt
+        read_only: true
+      - type: bind
+        source: "${SOURCE_DIRECTORY_HOST:?Define SOURCE_DIRECTORY_HOST en .env}"
+        target: /documents/source
+        read_only: true
+      - type: bind
+        source: "${BACKUP_DIRECTORY_HOST:?Define BACKUP_DIRECTORY_HOST en .env}"
+        target: /documents/backup
+        read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m

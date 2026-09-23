@@ -1,46 +1,64 @@
-# Dashboard ArchivoMunet
+# Dashboard documental
 
-Dashboard web para explorar el inventario de `ArchivoMunet` y las coincidencias registradas en el respaldo de Paperless. Incluye un pequeño servidor Node que entrega la interfaz y permite abrir los PDFs mediante HTTP.
+Dashboard web para explorar un inventario de documentos y las coincidencias registradas en un repositorio de referencia. La aplicación está diseñada para ejecutarse en Docker sin incorporar datos reales a la imagen.
 
-La fuente del inventario está en `data/inventory.txt`; el proceso de build genera `data/dashboard-data.json` a partir de ella.
+El informe, los documentos originales y el repositorio de referencia permanecen en el equipo del usuario. Docker Compose los monta como solo lectura; el servidor analiza el informe al arrancar y conserva el inventario únicamente en memoria.
 
-## Uso local
+## Inicio rápido
 
-```bash
-npm run build
-npm start
-```
-
-Abre `http://localhost:4173` en el navegador.
-
-Al abrir el dashboard puedes aceptar las rutas históricas mostradas o escribir las rutas actuales. También puedes cambiarlas después con **Rutas de archivos**. Las carpetas deben existir y ser accesibles para el usuario que ejecuta `npm start`.
-
-Los PDFs se sirven bajo `/files/` desde las dos carpetas elegidas. Esto permite abrirlos en una pestaña nueva sin depender de enlaces `file://`, que los navegadores bloquean desde páginas HTTP. Si una carpeta o un archivo no existe, la nueva pestaña muestra un aviso para revisar la configuración.
-
-Las rutas se guardan en el navegador y se vuelven a comunicar al servidor cuando se carga el dashboard. No se copian ni modifican los documentos originales.
-
-## Docker
-
-El proyecto incluye un `Dockerfile` que genera los datos y sirve el dashboard con el servidor Node incluido.
+En el equipo que contiene los documentos solo hacen falta Docker, `compose.yaml` y un archivo `.env`:
 
 ```bash
-docker build -t archivo-munet-dashboard .
-docker run --rm --name archivo-munet-dashboard -p 8080:4173 \
-  -v "/ruta/a/ArchivoMunet:/documents/source:ro" \
-  -v "/ruta/al/backup:/documents/backup:ro" \
-  archivo-munet-dashboard
+cp .env.example .env
 ```
 
-Abre `http://localhost:8080` en el navegador.
+Edita `.env` con las rutas absolutas del equipo y la versión publicada. Después ejecuta:
 
-En el formulario usa `/documents/source` y `/documents/backup`. Son las rutas internas del contenedor asociadas a las carpetas reales mediante los dos volúmenes de solo lectura.
+```bash
+docker compose pull
+docker compose up -d
+```
 
-Consulta `DOCKER.md` para instrucciones más completas antes de subir o publicar la imagen.
+Abre `http://localhost:8080`. La imagen pública de GHCR no requiere `docker login`.
 
-## Validación
+Para actualizar, cambia `DASHBOARD_VERSION` y repite los dos comandos. Consulta [DOCKER.md](DOCKER.md) para la configuración y publicación.
+
+## Formato del informe
+
+El parser admite el formato de desglose actual ArchivoMunet/Paperless. Obtiene las raíces originales de estas cabeceras:
+
+```text
+Carpeta origen ArchivoMunet:
+  /ruta/original
+
+Backup de Paperless:
+  /ruta/referencia
+```
+
+El nombre y ubicación del TXT en el host son libres porque se montan en `/input/inventory.txt`. Un informe ausente, vacío o incompatible hace que el contenedor termine con un error explicativo.
+
+## Desarrollo
+
+Las pruebas utilizan exclusivamente datos sintéticos:
 
 ```bash
 npm test
 ```
 
-El generador conserva los PDFs de ArchivoMunet, los documentos sin coincidencia y los grupos de coincidencias ambiguas sin asignar una correspondencia de forma arbitraria.
+Para ejecutar sin Docker:
+
+```bash
+INVENTORY_FILE=/ruta/al/informe.txt \
+SOURCE_FILES_ROOT=/ruta/a/origen \
+BACKUP_FILES_ROOT=/ruta/a/referencia \
+npm start
+```
+
+Variables opcionales: `APP_TITLE`, `SOURCE_LABEL`, `BACKUP_LABEL`, `HOST` y `PORT`.
+
+## Privacidad
+
+- Los datos reales están excluidos por `.gitignore` y `.dockerignore`.
+- La imagen no contiene informes ni inventarios generados.
+- Los tres volúmenes de Compose se montan como solo lectura.
+- El servicio escucha por defecto únicamente en `127.0.0.1` y no incorpora autenticación.

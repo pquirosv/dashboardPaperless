@@ -1,21 +1,20 @@
 import { createReadStream } from 'node:fs';
-import { access, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseInventory } from './scripts/inventory.mjs';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const publicFiles = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ['/data/dashboard-data.json', ['data/dashboard-data.json', 'application/json; charset=utf-8']]
+  ['/styles.css', ['styles.css', 'text/css; charset=utf-8']]
 ]);
 
 const isDirectory = async (candidate) => {
   try {
-    await access(candidate);
     return (await stat(candidate)).isDirectory();
   } catch {
     return false;
@@ -38,25 +37,23 @@ export function resolveUnderRoot(configuredRoot, encodedPath) {
 
 function sendJson(response, status, value) {
   const body = `${JSON.stringify(value)}\n`;
-  response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+  response.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  });
   response.end(body);
 }
 
 function sendErrorPage(response, status, message) {
-  const body = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Archivo no disponible</title><style>body{font:16px system-ui;margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f2;color:#20201e}.card{max-width:600px;margin:24px;padding:32px;background:white;border:1px solid #ddd;border-radius:12px}h1{margin-top:0}button{padding:10px 16px}</style><main class="card"><h1>Archivo no disponible</h1><p>${message}</p><p>Cierra esta pestaña y, en el dashboard, abre <strong>Rutas de archivos</strong> para comprobar la carpeta configurada.</p><button onclick="window.close()">Cerrar pestaña</button></main></html>`;
-  response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
+  const body = `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Archivo no disponible</title><style>body{font:16px system-ui;margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f5f2;color:#20201e}.card{max-width:600px;margin:24px;padding:32px;background:white;border:1px solid #ddd;border-radius:12px}h1{margin-top:0}button{padding:10px 16px}</style><main class="card"><h1>Archivo no disponible</h1><p>${message}</p><p>Comprueba los volúmenes configurados en Compose y reinicia el contenedor.</p><button onclick="window.close()">Cerrar pestaña</button></main></html>`;
+  response.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Content-Length': Buffer.byteLength(body),
+    'X-Content-Type-Options': 'nosniff'
+  });
   response.end(body);
-}
-
-async function readJson(request) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > 16_384) throw new Error('Payload demasiado grande.');
-    chunks.push(chunk);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
 async function sendFile(request, response, filePath, contentType, friendlyError = false) {
@@ -65,13 +62,13 @@ async function sendFile(request, response, filePath, contentType, friendlyError 
     if (!details.isFile()) return friendlyError
       ? sendErrorPage(response, 404, 'No existe ningún archivo con esta ruta.')
       : sendJson(response, 404, { error: 'Archivo no encontrado.' });
-    const headers = {
+    response.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': details.size,
       'Accept-Ranges': 'bytes',
-      'Content-Disposition': 'inline'
-    };
-    response.writeHead(200, headers);
+      'Content-Disposition': 'inline',
+      'X-Content-Type-Options': 'nosniff'
+    });
     if (request.method === 'HEAD') return response.end();
     createReadStream(filePath).pipe(response);
   } catch {
@@ -80,37 +77,29 @@ async function sendFile(request, response, filePath, contentType, friendlyError 
   }
 }
 
-async function initialConfiguration() {
-  const inventory = JSON.parse(await readFile(path.join(root, 'data', 'dashboard-data.json'), 'utf8'));
-  return { sourceRoot: inventory.sourceRoot, backupRoot: inventory.backupRoot };
+export async function loadInventory(options = {}) {
+  const inventoryFile = options.inventoryFile || process.env.INVENTORY_FILE || '/input/inventory.txt';
+  const input = await readFile(inventoryFile, 'utf8');
+  return parseInventory(input, {
+    generatedFrom: path.basename(inventoryFile),
+    appTitle: options.appTitle || process.env.APP_TITLE,
+    sourceLabel: options.sourceLabel || process.env.SOURCE_LABEL,
+    backupLabel: options.backupLabel || process.env.BACKUP_LABEL
+  });
 }
 
-async function configuration(configured) {
-  return {
-    source: { root: configured.sourceRoot, available: await isDirectory(configured.sourceRoot) },
-    backup: { root: configured.backupRoot, available: await isDirectory(configured.backupRoot) }
+export function createDashboardServer(options) {
+  if (!options?.inventory) throw new Error('Se necesita un inventario para iniciar el servidor.');
+  const inventory = options.inventory;
+  const files = {
+    source: path.resolve(options.sourceFilesRoot || '/documents/source'),
+    backup: path.resolve(options.backupFilesRoot || '/documents/backup')
   };
-}
 
-export async function createDashboardServer() {
-  let configured = await initialConfiguration();
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
-
-    if (url.pathname === '/api/config' && request.method === 'GET') return sendJson(response, 200, await configuration(configured));
-    if (url.pathname === '/api/config' && request.method === 'POST') {
-      try {
-        const next = await readJson(request);
-        if (!path.isAbsolute(next.sourceRoot) || !path.isAbsolute(next.backupRoot)) {
-          return sendJson(response, 400, { error: 'Las dos rutas deben ser absolutas.' });
-        }
-        configured = { sourceRoot: path.resolve(next.sourceRoot), backupRoot: path.resolve(next.backupRoot) };
-        return sendJson(response, 200, await configuration(configured));
-      } catch {
-        return sendJson(response, 400, { error: 'No se pudieron guardar las rutas.' });
-      }
-    }
-
+    if (url.pathname === '/api/health' && request.method === 'GET') return sendJson(response, 200, { status: 'ok' });
+    if (url.pathname === '/api/inventory' && request.method === 'GET') return sendJson(response, 200, inventory);
     if (!['GET', 'HEAD'].includes(request.method)) return sendJson(response, 405, { error: 'Método no permitido.' });
 
     const publicFile = publicFiles.get(url.pathname);
@@ -118,21 +107,32 @@ export async function createDashboardServer() {
 
     const match = url.pathname.match(/^\/files\/(source|backup)\/(.+)$/);
     if (match) {
-      const roots = await configuration(configured);
-      const selected = roots[match[1]];
-      if (!selected.available) return sendErrorPage(response, 404, 'La carpeta configurada no existe o no está accesible en este equipo.');
-      const filePath = resolveUnderRoot(selected.root, match[2]);
+      const selectedRoot = files[match[1]];
+      if (!await isDirectory(selectedRoot)) return sendErrorPage(response, 404, 'La carpeta montada no existe o no está accesible.');
+      const filePath = resolveUnderRoot(selectedRoot, match[2]);
       if (!filePath) return sendErrorPage(response, 400, 'La ruta solicitada no es válida.');
       return sendFile(request, response, filePath, 'application/pdf', true);
     }
-
     return sendJson(response, 404, { error: 'Recurso no encontrado.' });
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+async function main() {
+  const inventory = await loadInventory();
   const port = Number(process.env.PORT || 4173);
-  const host = process.env.HOST || '127.0.0.1';
-  const server = await createDashboardServer();
-  server.listen(port, host, () => console.log(`Dashboard disponible en http://localhost:${port}`));
+  const host = process.env.HOST || '0.0.0.0';
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT debe ser un puerto válido.');
+  const server = createDashboardServer({
+    inventory,
+    sourceFilesRoot: process.env.SOURCE_FILES_ROOT,
+    backupFilesRoot: process.env.BACKUP_FILES_ROOT
+  });
+  server.listen(port, host, () => console.log(`Dashboard disponible en http://${host}:${port}`));
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    console.error(`No se pudo iniciar el dashboard: ${error.message}`);
+    process.exitCode = 1;
+  });
 }

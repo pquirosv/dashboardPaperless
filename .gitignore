@@ -1,0 +1,6 @@
+.env
+data/
+**/dashboard-data.json
+**/desglose-documentos*.txt
+node_modules/
+npm-debug.log
