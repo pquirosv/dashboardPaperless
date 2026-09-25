@@ -1,0 +1,16 @@
+services:
+  dashboard:
+    build: .
+    image: dashboard-documental:local
+    init: true
+    restart: on-failure:3
+    environment:
+      INVENTORY_EXISTS: "true"
+      INVENTORY_INPUT: /input/data
+    ports:
+      - "127.0.0.1:${DASHBOARD_PORT:-8080}:4173"
+    volumes:
+      - type: bind
+        source: /home/pablo/workspace/dashboardMunet/desglose-documentos-2026-09-11.txt
+        target: /input/data
+        read_only: true

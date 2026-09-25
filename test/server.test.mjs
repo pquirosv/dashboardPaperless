@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createDashboardServer, loadInventory, resolveUnderRoot } from '../server.mjs';
+import { checkFiles } from '../scripts/check-files.mjs';
 
 const fixture = new URL('./fixtures/sample-inventory.txt', import.meta.url);
 
@@ -24,6 +25,25 @@ test('loads a mounted inventory and applies neutral display labels', async () =>
   assert.equal(data.display.sourceLabel, 'Origen');
   assert.equal(data.display.backupLabel, 'Referencia');
   assert.equal(data.generatedFrom, 'sample-inventory.txt');
+});
+
+test('checks inventory paths against different mounted host roots', async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'document-dashboard-mounts-'));
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const sourceRoot = path.join(temporaryRoot, 'host-source');
+  const backupRoot = path.join(temporaryRoot, 'host-backup');
+  await mkdir(path.join(sourceRoot, 'Grupo'), { recursive: true });
+  await mkdir(path.join(backupRoot, 'originales'), { recursive: true });
+  await writeFile(path.join(sourceRoot, 'Grupo', 'documento uno.pdf'), '%PDF-source');
+  await writeFile(path.join(backupRoot, 'originales', 'referencia uno.pdf'), '%PDF-backup');
+  const inventory = await loadInventory({ inventoryFile: fixture.pathname });
+  const result = await checkFiles(inventory, { source: sourceRoot, backup: backupRoot });
+  assert.equal(result.source.rootAvailable, true);
+  assert.equal(result.source.total, 4);
+  assert.equal(result.source.missing.length, 3);
+  assert.equal(result.backup.total, 3);
+  assert.equal(result.backup.missing.length, 2);
+  assert.ok(result.backup.missing.some((item) => item.relative === 'originales/referencia dos.pdf'));
 });
 
 test('serves inventory, health and mounted files without mutable configuration', async (context) => {

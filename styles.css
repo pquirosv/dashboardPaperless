@@ -22,7 +22,7 @@ main { max-width:1440px; margin:auto; padding:32px clamp(20px,5vw,84px) 48px; }.
 .tree-folder small { font-size:12px; }
 .app-brand small,.document-copy small,.attribute-group-name small,.attribute-option > button small,.attribute-file small { font-size:12px; }
 .attribute-group-name strong { font-size:16px; }
-.attribute-group-name small,.attribute-group-count { font:12px 'DM Mono',monospace; }
+.attribute-group-name small,.attribute-group-count { font:14px 'DM Mono',monospace; }
 .attribute-option > button > span:first-child { font-size:14px; }
 .attribute-option > button > span:first-child { overflow:visible; white-space:normal; }
 .match-card .metadata { gap:14px; }

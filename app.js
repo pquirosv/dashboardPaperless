@@ -83,7 +83,7 @@ function paperlessFileTotal() {
 
 function attributeFilesMarkup(group) {
   const files = [...group.files.values()].sort((left, right) => left.path.localeCompare(right.path, 'es'));
-  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de ${safe(state.data.display.backupLabel)}</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small>${safe(file.path)}</small>${file.references > 1 ? `<span>${file.references} referencias</span>` : ''}</article>`).join('')}</div>`;
+  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de ${safe(state.data.display.backupLabel)}</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small class="path">${pathMarkup(file.path, 'backup')}</small>${file.references > 1 ? `<span>${file.references} referencias</span>` : ''}</article>`).join('')}</div>`;
 }
 
 function matchesAttributeQuery(group) {

@@ -1,7 +1,9 @@
 services:
   dashboard:
-    # Imagen y etiqueta publicadas en el registro de contenedores.
+    # Imagen local o publicada, según la configuración.
     image: "${DASHBOARD_IMAGE:?Define DASHBOARD_IMAGE en .env}:${DASHBOARD_VERSION:?Define DASHBOARD_VERSION en .env}"
+    build:
+      context: ..
 
     # Permite que Docker gestione correctamente las señales y los procesos hijos.
     init: true
@@ -24,7 +26,8 @@ services:
       # Etiqueta visible para los documentos de referencia.
       BACKUP_LABEL: "${BACKUP_LABEL:?Define BACKUP_LABEL en .env}"
       # Rutas internas del contenedor; no son rutas del equipo anfitrión.
-      INVENTORY_FILE: /input/inventory.txt
+      INVENTORY_INPUT: /input/data
+      INVENTORY_EXISTS: "${INVENTORY_EXISTS:?Define INVENTORY_EXISTS en .env}"
       SOURCE_FILES_ROOT: /documents/source
       BACKUP_FILES_ROOT: /documents/backup
 
@@ -33,10 +36,10 @@ services:
       - "${DASHBOARD_HOST_BIND:?Define DASHBOARD_HOST_BIND en .env}:${DASHBOARD_PORT:?Define DASHBOARD_PORT en .env}:4173"
 
     volumes:
-      # Monta el informe del equipo anfitrión como solo lectura.
+      # Monta un TXT existente o la carpeta exportada, según INVENTORY_EXISTS.
       - type: bind
-        source: "${INVENTORY_FILE_HOST:?Define INVENTORY_FILE_HOST en .env}"
-        target: /input/inventory.txt
+        source: "${INVENTORY_INPUT_HOST:?Define INVENTORY_INPUT_HOST en .env}"
+        target: /input/data
         read_only: true
       # Monta los documentos de origen sin copiarlos a la imagen.
       - type: bind
@@ -50,5 +53,35 @@ services:
         read_only: true
 
     # Proporciona espacio temporal escribible sin alterar la imagen ni el host.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+
+  generator:
+    profiles: [generate]
+    image: "${DASHBOARD_IMAGE:?Define DASHBOARD_IMAGE en .env}:${DASHBOARD_VERSION:?Define DASHBOARD_VERSION en .env}"
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    entrypoint: [python3, /app/desglose_documental.py]
+    environment:
+      SOURCE_FILES_ROOT: /documents/source
+      BACKUP_FILES_ROOT: /documents/backup
+      INVENTORY_OUTPUT: /input/data/desglose-documentos.txt
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      # Solo este servicio puede escribir el informe en la exportación.
+      - type: bind
+        source: "${INVENTORY_INPUT_HOST:?Define INVENTORY_INPUT_HOST en .env}"
+        target: /input/data
+      - type: bind
+        source: "${SOURCE_DIRECTORY_HOST:?Define SOURCE_DIRECTORY_HOST en .env}"
+        target: /documents/source
+        read_only: true
+      - type: bind
+        source: "${BACKUP_DIRECTORY_HOST:?Define BACKUP_DIRECTORY_HOST en .env}"
+        target: /documents/backup
+        read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m

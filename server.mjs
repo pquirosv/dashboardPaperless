@@ -78,12 +78,16 @@ async function sendFile(request, response, filePath, contentType, friendlyError 
 }
 
 export async function loadInventory(options = {}) {
-  const inventoryFile = options.inventoryFile || process.env.INVENTORY_FILE || '/input/inventory.txt';
+  const inputMode = options.inventoryExists ?? process.env.INVENTORY_EXISTS ?? 'true';
+  if (!['true', 'false'].includes(String(inputMode))) throw new Error('INVENTORY_EXISTS debe ser true o false.');
+  const inputPath = options.inventoryInput || process.env.INVENTORY_INPUT || '/input/data';
+  const inventoryFile = options.inventoryFile || process.env.INVENTORY_FILE ||
+    (String(inputMode) === 'true' ? inputPath : path.join(inputPath, 'desglose-documentos.txt'));
   let details;
   try {
     details = await stat(inventoryFile);
   } catch (error) {
-    if (error.code === 'ENOENT') throw new Error(`No existe INVENTORY_FILE: ${inventoryFile}`);
+    if (error.code === 'ENOENT') throw new Error(`No existe INVENTORY_FILE: ${inventoryFile}${String(inputMode) === 'false' ? '. Ejecuta primero el servicio generator con Docker Compose.' : ''}`);
     throw new Error(`No se puede acceder a INVENTORY_FILE (${inventoryFile}): ${error.message}`);
   }
   if (!details.isFile()) throw new Error(`INVENTORY_FILE no es un archivo: ${inventoryFile}`);

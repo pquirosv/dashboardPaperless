@@ -1,29 +1,38 @@
-FROM node:22-alpine AS test
+FROM node:22-alpine AS base
+
+RUN apk add --no-cache python3
+
+FROM base AS test
 
 WORKDIR /app
 
 COPY package.json ./
 COPY server.mjs ./
+COPY desglose_documental.py ./
 COPY scripts ./scripts
 COPY test ./test
 
 RUN npm test
 
-FROM node:22-alpine
+FROM base
+
+RUN mkdir -p /input /documents/source /documents/backup
 
 ENV HOST=0.0.0.0 \
     PORT=4173 \
-    INVENTORY_FILE=/input/inventory.txt \
+    INVENTORY_INPUT=/input/data \
+    INVENTORY_EXISTS=true \
     SOURCE_FILES_ROOT=/documents/source \
-    BACKUP_FILES_ROOT=/documents/backup
+    BACKUP_FILES_ROOT=/documents/backup \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
-
-RUN mkdir -p /input /documents/source /documents/backup
 
 COPY --from=test --chown=node:node /app/package.json ./package.json
 COPY --chown=node:node index.html app.js styles.css server.mjs ./
 COPY --chown=node:node scripts/inventory.mjs ./scripts/inventory.mjs
+COPY --chown=node:node scripts/check-files.mjs ./scripts/check-files.mjs
+COPY --chown=node:node desglose_documental.py ./desglose_documental.py
 
 USER node
 
