@@ -138,13 +138,14 @@ npm start
 - `config/.env` nunca debe subirse; usa `config/.env.example` como plantilla.
 - La imagen se construye sin incluir documentos locales.
 - La aplicación escucha por defecto solo en `127.0.0.1` y no proporciona autenticación.
-- El workflow de GitHub Actions ejecuta las pruebas y construye la imagen en cada cambio; al crear un tag `vX.Y.Z`, también la publica en GHCR.
+- El workflow de GitHub Actions ejecuta las pruebas y construye la imagen en cada cambio. En los push a `main`, solo publica en GHCR si cambia la versión de `package.json` y el incremento es válido respecto al último tag `vX.Y.Z`; después crea y sube el tag correspondiente.
 
-Para publicar una versión:
+Para publicar una versión, cambia manualmente `version` en `package.json` siguiendo exactamente una de estas reglas respecto a la última versión publicada:
 
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+- **Patch:** `X.Y.Z` → `X.Y.(Z+1)`.
+- **Minor:** `X.Y.Z` → `X.(Y+1).0`.
+- **Major:** `X.Y.Z` → `(X+1).0.0`.
+
+Sube el cambio a `main` como de costumbre. Si la versión no cambia, no se publica un paquete. Si el cambio no es exactamente un incremento patch, minor o major (incluidos los reinicios a cero requeridos), el workflow falla antes de publicar y explica el motivo. Los cambios de versión en pull requests no publican; la publicación ocurre al llegar a `main`.
 
 Después de publicar por primera vez, cambia la visibilidad del paquete de GHCR a pública y verifica una descarga anónima. La visibilidad del repositorio se cambia desde la configuración de GitHub, no desde `docker-compose.yml`.
