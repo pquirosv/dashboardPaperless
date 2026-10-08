@@ -29,6 +29,17 @@ const attributeDefinitions = [
   { key: 'storagePath', label: 'Path storages', plural: 'path storages' }
 ];
 
+const filterDefinitions = [
+  { key: 'all', label: 'Todos', count: 'total' },
+  { key: 'found', label: 'Encontrados', count: 'found' },
+  { key: 'ambiguous', label: 'Agrupados', count: 'grouped' },
+  { key: 'missing', label: 'Sin coincidencia', count: 'missing' }
+];
+const searchIcon = '<svg class="search-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>';
+const chevron = '<span class="chev" aria-hidden="true"></span>';
+let playIntro = true;
+
+const plural = (count, one, many) => `${number.format(count)} ${count === 1 ? one : many}`;
 const safe = (value) => String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 const getDocument = (id) => state.data.documents.find((document) => document.id === id);
 const findFolder = (path, folder = state.data.tree) => folder.path === path ? folder : folder.folders.map((child) => findFolder(path, child)).find(Boolean);
@@ -54,10 +65,21 @@ function allDocuments(folder) {
 }
 
 function visible(document) {
-  const matchesFilter = state.filter === 'all' || (state.filter === 'found' && document.found) || (state.filter === 'missing' && !document.found) || (state.filter === 'ambiguous' && document.ambiguous);
+  const matchesFilter = state.filter === 'all' || (state.filter === 'found' && document.found && !document.ambiguous) || (state.filter === 'missing' && !document.found) || (state.filter === 'ambiguous' && document.ambiguous);
   const haystack = `${document.sourcePath} ${document.matches.map((match) => `${match.title ?? ''} ${match.tags?.join(' ') ?? ''} ${match.correspondent ?? ''} ${match.documentType ?? ''}`).join(' ')}`.toLocaleLowerCase('es');
   return matchesFilter && haystack.includes(state.query.toLocaleLowerCase('es'));
 }
+
+function coverageCounts(documents) {
+  const missing = documents.filter((document) => !document.found).length;
+  const grouped = documents.filter((document) => document.found && document.ambiguous).length;
+  return { total: documents.length, found: documents.length - missing - grouped, grouped, missing };
+}
+
+const coverageSegments = ({ found, grouped, missing }) => [['found', found], ['grouped', grouped], ['missing', missing]]
+  .filter(([, count]) => count > 0)
+  .map(([kind, count]) => `<span class="seg seg-${kind}" style="flex-grow:${count}"></span>`)
+  .join('');
 
 function attributeGroups(definition) {
   const groups = new Map();
@@ -83,7 +105,7 @@ function paperlessFileTotal() {
 
 function attributeFilesMarkup(group) {
   const files = [...group.files.values()].sort((left, right) => left.path.localeCompare(right.path, 'es'));
-  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de ${safe(state.data.display.backupLabel)}</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small class="path">${pathMarkup(file.path, 'backup')}</small>${file.references > 1 ? `<span>${file.references} referencias</span>` : ''}</article>`).join('')}</div>`;
+  return `<div class="attribute-files"><div class="attribute-files-heading"><span>Archivos de ${safe(state.data.display.backupLabel)}</span><strong>${number.format(files.length)}</strong></div>${files.map((file) => `<article class="attribute-file"><strong>${safe(file.title || pathName(file.path))}</strong><small class="path">${pathMarkup(file.path, 'backup')}</small>${file.references > 1 ? `<span>${number.format(file.references)} referencias</span>` : ''}</article>`).join('')}</div>`;
 }
 
 function matchesAttributeQuery(group) {
@@ -94,32 +116,39 @@ function matchesAttributeQuery(group) {
 
 function attributesView() {
   const groupsByType = new Map(attributeDefinitions.map((definition) => [definition.key, attributeGroups(definition)]));
-  return `<section class="attributes-panel"><div class="attributes-heading"><div><span class="eyebrow">Inventario de referencia</span><h1>Atributos y archivos</h1><p>Explora los valores registrados y consulta todos los archivos asociados a cada atributo.</p><label class="search attributes-search"><span>⌕</span><input id="attribute-search" type="search" placeholder="Buscar nombre de atributo" value="${safe(state.attributeQuery)}" /></label></div><span class="attributes-total">${number.format(paperlessFileTotal())} archivos relacionados</span></div><div class="attribute-groups">${attributeDefinitions.map((definition) => {
+  return `<section class="attributes-panel"><div class="attributes-heading"><h1>Atributos y archivos</h1><p>${plural(paperlessFileTotal(), 'archivo relacionado', 'archivos relacionados')}. Elige un valor para ver todos los archivos que lo usan.</p><label class="search attributes-search">${searchIcon}<input id="attribute-search" type="search" aria-label="Buscar atributo" placeholder="Buscar nombre de atributo" value="${safe(state.attributeQuery)}" /></label></div><div class="attribute-groups">${attributeDefinitions.map((definition) => {
     const allGroups = groupsByType.get(definition.key);
     const groups = allGroups.filter(matchesAttributeQuery);
     const isExpanded = state.expandedAttributeTypes.has(definition.key);
     const count = state.attributeQuery.trim() ? `${number.format(groups.length)} de ${number.format(allGroups.length)}` : number.format(allGroups.length);
-    return `<section class="attribute-group ${isExpanded ? 'expanded' : ''}"><button class="attribute-group-toggle" data-attribute-group="${definition.key}" aria-expanded="${isExpanded}"><span class="attribute-group-icon">${definition.key === 'tags' ? '#' : definition.key === 'correspondent' ? '@' : definition.key === 'documentType' ? 'T' : '/'}</span><span class="attribute-group-name"><strong>${definition.label}</strong><small>${count} ${definition.plural}</small></span><span class="attribute-group-count">${count}</span><span class="attribute-group-arrow">›</span></button>${isExpanded ? `<div class="attribute-options">${groups.map((group) => {
+    return `<section class="attribute-group ${isExpanded ? 'expanded' : ''}"><button class="attribute-group-toggle" data-attribute-group="${definition.key}" aria-expanded="${isExpanded}"><span class="attribute-group-icon" aria-hidden="true">${definition.key === 'tags' ? '#' : definition.key === 'correspondent' ? '@' : definition.key === 'documentType' ? 'T' : '/'}</span><span class="attribute-group-name"><strong>${definition.label}</strong></span><span class="attribute-group-count">${count}</span>${chevron}</button>${isExpanded ? `<div class="attribute-options">${groups.map((group) => {
       const selection = state.selectedAttribute;
       const isSelected = selection?.type === definition.key && selection.value === group.name;
-      return `<div class="attribute-option ${isSelected ? 'selected' : ''}"><button data-attribute-type="${definition.key}" data-attribute-value="${safe(group.name)}"><span>${linedValue(group.name)}</span><strong>${number.format(group.files.size)} archivos</strong><span class="attribute-option-arrow">›</span></button>${isSelected ? attributeFilesMarkup(group) : ''}</div>`;
+      return `<div class="attribute-option ${isSelected ? 'selected' : ''}"><button data-attribute-type="${definition.key}" data-attribute-value="${safe(group.name)}" aria-expanded="${isSelected}"><span>${linedValue(group.name)}</span><strong>${plural(group.files.size, 'archivo', 'archivos')}</strong>${chevron}</button>${isSelected ? attributeFilesMarkup(group) : ''}</div>`;
     }).join('') || `<p class="empty-state">${state.attributeQuery.trim() ? 'No hay atributos que coincidan con la búsqueda.' : 'No hay atributos registrados.'}</p>`}</div>` : ''}</section>`;
   }).join('')}</div></section>`;
 }
 
+const statusKind = (document) => !document.found ? 'missing' : document.ambiguous ? 'ambiguous' : 'found';
+
 function statusChip(document) {
-  if (!document.found) return '<span class="status missing">Sin coincidencia</span>';
-  if (document.ambiguous) return '<span class="status ambiguous">Coincidencia agrupada</span>';
-  return '<span class="status found">Encontrado</span>';
+  const kind = statusKind(document);
+  const label = { missing: 'Sin coincidencia', ambiguous: 'Coincidencia agrupada', found: 'Encontrado' }[kind];
+  return `<span class="status ${kind}">${label}</span>`;
 }
 
-function folderMarkup(folder, level = 0) {
+function folderMarkup(folder) {
   const isSelected = selectedFolder().path === folder.path;
   const isExpanded = state.expandedFolders.has(folder.path);
-  const childFolders = isExpanded ? folder.folders.map((child) => folderMarkup(child, level + 1)).join('') : '';
-  const content = `<span class="folder-glyph">▣</span><span>${safe(folder.name)}</span><small>${number.format(folder.stats.documents)}</small>`;
+  const hasChildren = folder.folders.length > 0;
+  const childFolders = isExpanded ? folder.folders.map(folderMarkup).join('') : '';
+  const { documents, found, ambiguous } = folder.stats;
+  const cover = coverageSegments({ found: found - ambiguous, grouped: ambiguous, missing: documents - found });
+  const expander = hasChildren ? '<span class="chev tree-chevron" aria-hidden="true"></span>' : '<span></span>';
+  const content = `${expander}<span class="tree-name">${safe(folder.name)}</span><span class="mini-cover" aria-hidden="true">${cover}</span><span class="tree-count">${number.format(documents)}</span>`;
   const className = `tree-folder ${isSelected ? 'selected' : ''} ${isExpanded ? 'expanded' : ''}`;
-  return `<div class="tree-node"><button class="${className}" data-folder="${safe(folder.path)}" style="--depth:${level}">${content}</button>${childFolders ? `<div class="tree-children">${childFolders}</div>` : ''}</div>`;
+  const attributes = `${hasChildren ? ` aria-expanded="${isExpanded}"` : ''}${isSelected ? ' aria-current="true"' : ''}`;
+  return `<div class="tree-node"><button class="${className}" data-folder="${safe(folder.path)}"${attributes}>${content}</button>${childFolders ? `<div class="tree-children">${childFolders}</div>` : ''}</div>`;
 }
 
 function detailsMarkup(match) {
@@ -134,46 +163,81 @@ function detailsMarkup(match) {
 function documentDetail(document) {
   const matches = document.matches.length ? document.matches.map((match, index) => `
     <article class="match-card">
-      <div class="match-heading"><span>${safe(state.data.display.backupLabel)} ${document.matches.length > 1 ? index + 1 : ''}</span><strong>${safe(pathName(match.path))}</strong></div>
+      <div class="match-heading">${document.matches.length > 1 ? `<span class="match-index">Candidato ${index + 1} de ${document.matches.length}</span>` : ''}<strong>${safe(pathName(match.path))}</strong></div>
       ${pathMarkup(match.path, 'backup')}
       ${detailsMarkup(match)}
     </article>`).join('') : `<div class="empty-state"><strong>No hay una coincidencia en el repositorio de referencia.</strong><span>Este PDF forma parte de los ${number.format(state.data.summary.missing)} documentos sin equivalencia.</span></div>`;
   return `<section class="detail-panel">
     <button class="back-button" data-back-to-folder>← Volver a ${safe(selectedFolder().name)}</button>
-    <div class="detail-title"><div><span class="eyebrow">${safe(state.data.display.sourceLabel)}</span><h2>${safe(pathName(document.sourcePath))}</h2>${pathMarkup(document.sourcePath, 'source')}</div>${statusChip(document)}</div>
+    <div class="detail-title"><div><h2>${safe(pathName(document.sourcePath))}</h2>${pathMarkup(document.sourcePath, 'source')}</div>${statusChip(document)}</div>
     ${document.ambiguous ? `<p class="notice">Esta relación se registró como <strong>${safe(document.relation)}</strong>. Se muestran todos los candidatos para evitar una asignación arbitraria.</p>` : ''}
+    ${document.matches.length ? `<h3 class="section-title">${document.matches.length > 1 ? 'Coincidencias' : 'Coincidencia'} en ${safe(state.data.display.backupLabel)}</h3>` : ''}
     <div class="match-grid">${matches}</div>
   </section>`;
 }
 
 function documentRow(document) {
-  const content = `<span class="pdf-glyph">PDF</span><span class="document-copy"><strong>${safe(pathName(document.sourcePath))}</strong><small>${safe(relativePath(document.sourcePath))}</small></span>${statusChip(document)}${document.matches.length > 1 ? `<span class="candidate-count">${document.matches.length} candidatos</span>` : ''}`;
-  if (!document.matches.length) return `<div class="document-row document-row-static">${content}</div>`;
-  return `<button class="document-row" data-document="${document.id}">${content}<span class="arrow">›</span></button>`;
+  const directory = relativePath(document.sourcePath).split('/').slice(0, -1).join('/');
+  const candidates = document.matches.length > 1 ? `<small>${plural(document.matches.length, 'candidato', 'candidatos')}</small>` : '';
+  const content = `<span class="document-copy"><strong>${safe(pathName(document.sourcePath))}</strong>${directory ? `<small>${safe(directory)}</small>` : ''}</span><span class="document-status">${statusChip(document)}${candidates}</span>`;
+  const className = `document-row is-${statusKind(document)}`;
+  if (!document.matches.length) return `<div class="${className} document-row-static">${content}</div>`;
+  return `<button class="${className}" data-document="${document.id}">${content}${chevron}</button>`;
+}
+
+function coverageMarkup(counts) {
+  const summary = counts.total
+    ? `<strong>${number.format(counts.found + counts.grouped)} de ${number.format(counts.total)}</strong> PDFs tienen coincidencia.`
+    : 'Esta carpeta no contiene PDFs.';
+  const filters = filterDefinitions.map(({ key, label, count }) => `<button class="filter filter-${key} ${state.filter === key ? 'active' : ''}" data-filter="${key}" aria-pressed="${state.filter === key}">${key === 'all' ? '' : '<span class="swatch" aria-hidden="true"></span>'}${label}<b>${number.format(counts[count])}</b></button>`).join('');
+  return `<div class="coverage" data-active="${state.filter}"><p class="coverage-summary">${summary}</p><div class="coverage-bar${playIntro ? ' is-intro' : ''}" aria-hidden="true">${coverageSegments(counts)}</div><div class="filters" role="group" aria-label="Filtrar por estado">${filters}</div></div>`;
 }
 
 function documentList(folder) {
-  const documents = allDocuments(folder).filter(visible).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, 'es'));
+  const folderDocuments = allDocuments(folder);
+  const counts = coverageCounts(folderDocuments);
+  const documents = folderDocuments.filter(visible).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, 'es'));
   const pageSize = 80;
   const pages = Math.max(1, Math.ceil(documents.length / pageSize));
   state.page = Math.min(state.page, pages);
   const pageDocuments = documents.slice((state.page - 1) * pageSize, state.page * pageSize);
   const breadcrumb = folder.path.replace(state.data.sourceRoot, state.data.display.sourceLabel);
   return `<section class="content-panel">
-    <div class="folder-heading"><div><span class="eyebrow">Carpeta seleccionada</span><h2>${safe(folder.name)}</h2><p>${safe(breadcrumb)}</p></div><div class="folder-stats"><span>${number.format(folder.stats.documents)} PDFs</span><span>${number.format(folder.stats.found)} encontrados</span></div></div>
-    <div class="results-bar"><strong>${number.format(documents.length)} documentos visibles</strong><span>Selecciona un PDF para ver sus coincidencias y metadatos.</span></div>
+    <div class="folder-heading"><h2>${safe(folder.name)}</h2>${breadcrumb === folder.name ? '' : `<p class="folder-path">${safe(breadcrumb)}</p>`}</div>
+    ${coverageMarkup(counts)}
+    <div class="results-bar"><strong>${documents.length === counts.total ? plural(documents.length, 'documento', 'documentos') : `${number.format(documents.length)} de ${plural(counts.total, 'documento', 'documentos')}`}</strong><span>Selecciona un PDF para ver sus coincidencias y metadatos.</span></div>
     <div class="document-list">${pageDocuments.map(documentRow).join('') || '<div class="empty-state">No hay documentos que coincidan con la búsqueda o los filtros.</div>'}</div>
     ${pages > 1 ? `<nav class="pagination"><button data-page="${state.page - 1}" ${state.page === 1 ? 'disabled' : ''}>Anterior</button><span>Página ${state.page} de ${pages}</span><button data-page="${state.page + 1}" ${state.page === pages ? 'disabled' : ''}>Siguiente</button></nav>` : ''}
   </section>`;
 }
 
+// Cada render reconstruye el DOM: recordamos qué control tenía el foco para devolvérselo.
+const focusKeys = ['view', 'filter', 'folder', 'document', 'page', 'attributeGroup', 'attributeType', 'backToFolder'];
+
+function focusedControl() {
+  const active = document.activeElement;
+  const key = active && focusKeys.find((name) => name in active.dataset);
+  return key ? { key, value: active.dataset[key], attributeValue: active.dataset.attributeValue } : null;
+}
+
+function restoreFocus(control) {
+  if (!control) return;
+  const attribute = control.key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+  const target = [...document.querySelectorAll(`[data-${attribute}]`)].find((element) => element.dataset[control.key] === control.value && element.dataset.attributeValue === control.attributeValue);
+  target?.focus({ preventScroll: true });
+}
+
 function render() {
-  const { summary, tree } = state.data;
-  const archiveView = `<main>
-    <section class="workspace"><aside class="sidebar"><div class="sidebar-top"><span class="eyebrow">Navegador</span><label class="search sidebar-search"><span>⌕</span><input id="search" type="search" placeholder="Buscar archivo, etiqueta o corresponsal" value="${safe(state.query)}" /></label></div><div class="filter-set"><button class="filter ${state.filter === 'all' ? 'active' : ''}" data-filter="all">Todos <span>${number.format(summary.total)}</span></button><button class="filter ${state.filter === 'found' ? 'active' : ''}" data-filter="found">Encontrados <span>${number.format(summary.found)}</span></button><button class="filter ${state.filter === 'missing' ? 'active' : ''}" data-filter="missing">Sin coincidencia <span>${number.format(summary.missing)}</span></button><button class="filter ${state.filter === 'ambiguous' ? 'active' : ''}" data-filter="ambiguous">Agrupados <span>${number.format(summary.ambiguous)}</span></button></div><nav class="tree">${folderMarkup(tree)}</nav></aside><div class="main-view">${state.selectedDocument ? documentDetail(state.selectedDocument) : documentList(selectedFolder())}</div></section>
+  const { tree } = state.data;
+  const focused = focusedControl();
+  const archiveView = `<main class="archive">
+    <section class="workspace"><aside class="sidebar"><label class="search sidebar-search">${searchIcon}<input id="search" type="search" aria-label="Buscar documentos" placeholder="Buscar por nombre, etiqueta o corresponsal" value="${safe(state.query)}" /></label><nav class="tree" aria-label="Carpetas">${folderMarkup(tree)}</nav></aside><div class="main-view">${state.selectedDocument ? documentDetail(state.selectedDocument) : documentList(selectedFolder())}</div></section>
   </main>`;
-  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark">DD</span><div><strong>${safe(state.data.display.appTitle)}</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard"><button class="app-tab ${state.view === 'archive' ? 'active' : ''}" data-view="archive">Documentos</button><button class="app-tab ${state.view === 'attributes' ? 'active' : ''}" data-view="attributes">Atributos</button></nav></header>${state.view === 'attributes' ? `<main>${attributesView()}</main>` : archiveView}<footer>Fuente: ${safe(state.data.generatedFrom)} · Archivos servidos mediante HTTP.</footer>`;
+  const tab = (view, label) => `<button class="app-tab ${state.view === view ? 'active' : ''}" data-view="${view}"${state.view === view ? ' aria-current="page"' : ''}>${label}</button>`;
+  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>${safe(state.data.display.appTitle)}</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard">${tab('archive', 'Documentos')}${tab('attributes', 'Atributos')}</nav></header>${state.view === 'attributes' ? `<main class="attributes">${attributesView()}</main>` : archiveView}<footer>Informe: ${safe(state.data.generatedFrom)}</footer>`;
   bindEvents();
+  restoreFocus(focused);
+  playIntro = false;
 }
 
 function refocusSearch(position) {
