@@ -1,16 +1,23 @@
+name: dashboard-local
+
 services:
   dashboard:
-    build: .
     image: dashboard-documental:local
+    build: .
+    pull_policy: build
     init: true
     restart: on-failure:3
     environment:
+      APP_MODE: docker-local
+      APP_TITLE: "${APP_TITLE:-Dashboard Paperless}"
+      SOURCE_LABEL: "${SOURCE_LABEL:-Documentos de origen}"
+      BACKUP_LABEL: "${BACKUP_LABEL:-Repositorio de referencia}"
       INVENTORY_EXISTS: "true"
-      INVENTORY_INPUT: /input/data
+      INVENTORY_FILE: /input/inventory.json
     ports:
       - "127.0.0.1:${DASHBOARD_PORT:-8080}:4173"
     volumes:
       - type: bind
         source: ./test/fixtures/sample-inventory-v1.json
-        target: /input/data
+        target: /input/inventory.json
         read_only: true

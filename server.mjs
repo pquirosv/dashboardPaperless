@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,14 +25,19 @@ export function resolveUnderRoot(configuredRoot, encodedPath) {
   if (!configuredRoot) return null;
   let relative;
   try {
-    relative = encodedPath.split('/').map(decodeURIComponent).join('/');
+    const segments = encodedPath.split('/').map(decodeURIComponent);
+    if (segments.some((segment) => !segment || segment === '.' || segment === '..' || segment.includes('/') || segment.includes('\\'))) return null;
+    relative = segments.join(path.sep);
   } catch {
     return null;
   }
-  if (!relative || relative.includes('\0')) return null;
+  if (!relative || relative.includes('\0') || path.extname(relative).toLowerCase() !== '.pdf') return null;
   const absoluteRoot = path.resolve(configuredRoot);
   const candidate = path.resolve(absoluteRoot, relative);
-  return candidate.startsWith(`${absoluteRoot}${path.sep}`) ? candidate : null;
+  const relativeToRoot = path.relative(absoluteRoot, candidate);
+  return relativeToRoot && relativeToRoot !== '..' && !relativeToRoot.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeToRoot)
+    ? candidate
+    : null;
 }
 
 function sendJson(response, status, value) {
@@ -65,6 +70,7 @@ async function sendFile(request, response, filePath, contentType, friendlyError 
     response.writeHead(200, {
       'Content-Type': contentType,
       'Content-Length': details.size,
+      'Cache-Control': 'no-store',
       'Accept-Ranges': 'bytes',
       'Content-Disposition': 'inline',
       'X-Content-Type-Options': 'nosniff'
@@ -82,7 +88,7 @@ export async function loadInventory(options = {}) {
   if (!['true', 'false'].includes(String(inputMode))) throw new Error('INVENTORY_EXISTS debe ser true o false.');
   const inputPath = options.inventoryInput || process.env.INVENTORY_INPUT || '/input/data';
   const inventoryFile = options.inventoryFile || process.env.INVENTORY_FILE ||
-    (String(inputMode) === 'true' ? inputPath : path.join(inputPath, 'desglose-documentos.txt'));
+    (String(inputMode) === 'true' ? inputPath : path.join(inputPath, 'desglose-documentos.json'));
   let details;
   try {
     details = await stat(inventoryFile);
@@ -108,6 +114,7 @@ export async function loadInventory(options = {}) {
 export function createDashboardServer(options) {
   if (!options?.inventory) throw new Error('Se necesita un inventario para iniciar el servidor.');
   const inventory = options.inventory;
+  const runtime = options.runtime || { mode: 'local', version: 'unknown' };
   const files = {
     source: path.resolve(options.sourceFilesRoot || '/documents/source'),
     backup: path.resolve(options.backupFilesRoot || '/documents/backup')
@@ -116,6 +123,7 @@ export function createDashboardServer(options) {
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost');
     if (url.pathname === '/api/health' && request.method === 'GET') return sendJson(response, 200, { status: 'ok' });
+    if (url.pathname === '/api/runtime' && request.method === 'GET') return sendJson(response, 200, runtime);
     if (url.pathname === '/api/inventory' && request.method === 'GET') return sendJson(response, 200, inventory);
     if (!['GET', 'HEAD'].includes(request.method)) return sendJson(response, 405, { error: 'Método no permitido.' });
 
@@ -128,7 +136,16 @@ export function createDashboardServer(options) {
       if (!await isDirectory(selectedRoot)) return sendErrorPage(response, 404, 'La carpeta montada no existe o no está accesible.');
       const filePath = resolveUnderRoot(selectedRoot, match[2]);
       if (!filePath) return sendErrorPage(response, 400, 'La ruta solicitada no es válida.');
-      return sendFile(request, response, filePath, 'application/pdf', true);
+      try {
+        const [realRoot, realFile] = await Promise.all([realpath(selectedRoot), realpath(filePath)]);
+        const relative = path.relative(realRoot, realFile);
+        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+          return sendErrorPage(response, 404, 'No existe ningún archivo con esta ruta.');
+        }
+        return sendFile(request, response, realFile, 'application/pdf', true);
+      } catch {
+        return sendErrorPage(response, 404, 'No existe ningún archivo con esta ruta o no se puede leer.');
+      }
     }
     return sendJson(response, 404, { error: 'Recurso no encontrado.' });
   });
@@ -136,11 +153,16 @@ export function createDashboardServer(options) {
 
 async function main() {
   const inventory = await loadInventory();
+  const packageInfo = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
   const port = Number(process.env.PORT || 4173);
   const host = process.env.HOST || '0.0.0.0';
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('PORT debe ser un puerto válido.');
   const server = createDashboardServer({
     inventory,
+    runtime: {
+      mode: process.env.APP_MODE || 'local',
+      version: process.env.APP_VERSION || packageInfo.version
+    },
     sourceFilesRoot: process.env.SOURCE_FILES_ROOT,
     backupFilesRoot: process.env.BACKUP_FILES_ROOT
   });

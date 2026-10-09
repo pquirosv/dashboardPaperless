@@ -2,9 +2,11 @@
 .github
 .env
 .env.*
+/docker-compose.yml
 data
 **/dashboard-data.json
 **/desglose-documentos*.txt
+**/desglose-documentos*.json
 node_modules
 npm-debug.log
 README.md

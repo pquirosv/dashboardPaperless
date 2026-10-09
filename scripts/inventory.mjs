@@ -1,112 +1,182 @@
 import path from 'node:path';
 
-const clean = (value) => value.trim();
+const fail = (field, reason) => { throw new Error(`Inventario JSON v1 inválido en ${field}: ${reason}.`); };
+const isObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const requireObject = (value, field) => {
+  if (!isObject(value)) fail(field, 'se esperaba un objeto');
+  return value;
+};
+const requireArray = (value, field) => {
+  if (!Array.isArray(value)) fail(field, 'se esperaba una lista');
+  return value;
+};
+const requireString = (value, field) => {
+  if (typeof value !== 'string' || !value.length) fail(field, 'se esperaba una cadena no vacía');
+  return value;
+};
+const requireBoolean = (value, field) => {
+  if (typeof value !== 'boolean') fail(field, 'se esperaba un booleano');
+  return value;
+};
+const requireCount = (value, field) => {
+  if (!Number.isInteger(value) || value < 0) fail(field, 'se esperaba un entero no negativo');
+  return value;
+};
 
-function pathAfterHeading(lines, headingPattern, headingDescription) {
-  const headingIndex = lines.findIndex((line) => headingPattern.test(line.trim()));
-  if (headingIndex === -1) throw new Error(`Falta la cabecera obligatoria: ${headingDescription}`);
-  const value = lines.slice(headingIndex + 1).find((line) => line.trim());
-  if (!value || !path.isAbsolute(value.trim())) throw new Error(`La ruta indicada después de "${headingDescription}" no es absoluta.`);
-  return value.trim().replace(/\/+$/, '');
-}
-
-function sectionRange(lines, startPattern, endPattern, description) {
-  const start = lines.findIndex((line) => startPattern.test(line.trim()));
-  const end = lines.findIndex((line, index) => index > start && endPattern.test(line.trim()));
-  if (start === -1 || end === -1) throw new Error(`El informe no contiene la sección esperada: ${description}`);
-  return { start, end };
-}
-
-function parseAttributes(lines, startIndex, referencePrefix) {
-  const record = { path: clean(lines[startIndex].slice(referencePrefix.length)) };
-  let cursor = startIndex + 1;
-  while (cursor < lines.length && /^   (TÍTULO|ETIQUETAS|CORRESPONSAL|TIPO DOCUMENTAL|RUTA DE ALMACENAMIENTO|ESTADO):/.test(lines[cursor])) {
-    const line = lines[cursor].trim();
-    const separator = line.indexOf(':');
-    const key = line.slice(0, separator);
-    const value = clean(line.slice(separator + 1));
-    if (key === 'TÍTULO') record.title = value;
-    if (key === 'ETIQUETAS') record.tags = value.split(';').map(clean).filter(Boolean);
-    if (key === 'CORRESPONSAL') record.correspondent = value;
-    if (key === 'TIPO DOCUMENTAL') record.documentType = value;
-    if (key === 'RUTA DE ALMACENAMIENTO') record.storagePath = value;
-    if (key === 'ESTADO') record.status = value;
-    cursor += 1;
+function relativePath(value, field) {
+  requireString(value, field);
+  if (value.startsWith('/') || value.includes('\\') || value.includes('\0')) fail(field, 'ruta no relativa válida');
+  const segments = value.split('/');
+  if (segments.some((segment) => !segment || segment === '.' || segment === '..')) {
+    fail(field, 'ruta con segmento vacío o traversal');
   }
-  return { record, nextIndex: cursor };
+  if (/^[A-Za-z]:/.test(value)) fail(field, 'no se permiten rutas con unidad');
+  return value;
 }
 
-function relationForHeading(line, current) {
-  if (line.includes('RELACIÓN 1 A 1')) return '1 a 1';
-  if (line.includes('RELACIÓN VARIOS A VARIOS — MISMO NÚMERO')) return 'varios a varios: mismo número';
-  if (line.includes('RELACIÓN VARIOS A VARIOS — NÚMERO DISTINTO')) return 'varios a varios: número distinto';
-  return current;
-}
-
-function parseMatchedGroups(lines, format) {
-  const start = lines.findIndex((line) => line.trim() === format.matchedHeading);
-  const end = lines.findIndex((line, index) => index > start && line.trim() === format.manifestHeading);
-  if (start === -1 || end === -1) throw new Error('El informe no contiene la sección completa de documentos relacionados.');
-  const groups = [];
-  let relation = null;
-  let group = null;
-  let pendingLabel = null;
-  const finish = () => {
-    if (group?.sourcePaths.length) groups.push(group);
-    group = null;
-  };
-
-  for (let index = start; index < end; index += 1) {
-    const line = lines[index];
-    relation = relationForHeading(line, relation);
-    const groupLabel = line.match(/^(.+?\.pdf)\s+\(\d+\s+.+?\s*\/\s*\d+\s+.+?\)$/);
-    if (groupLabel) {
-      if (group?.paperless.length) finish();
-      pendingLabel = groupLabel[1];
-      continue;
-    }
-    if (line.startsWith(format.sourcePrefix)) {
-      if (group?.paperless.length) finish();
-      if (!group) {
-        group = { id: `group-${groups.length + 1}`, label: pendingLabel, relation, sourcePaths: [], paperless: [] };
-        pendingLabel = null;
-      }
-      group.sourcePaths.push(clean(line.slice(format.sourcePrefix.length)));
-      continue;
-    }
-    if (line.startsWith(format.referencePrefix)) {
-      if (!group) continue;
-      const { record, nextIndex } = parseAttributes(lines, index, format.referencePrefix);
-      group.paperless.push(record);
-      index = nextIndex - 1;
+function validatePaperlessDocument(value, field, { physical = false } = {}) {
+  const record = requireObject(value, field);
+  if (typeof record.manifestPresent !== 'boolean') fail(`${field}.manifestPresent`, 'se esperaba un booleano');
+  requireString(record.exportedFileName, `${field}.exportedFileName`);
+  if (record.backupPath !== undefined) relativePath(record.backupPath, `${field}.backupPath`);
+  if (physical && record.backupPath === undefined) fail(`${field}.backupPath`, 'requerido para un archivo físico');
+  if (typeof record.title === 'string' && !record.title.length) fail(`${field}.title`, 'cadena vacía no válida');
+  if (record.title !== undefined && typeof record.title !== 'string') fail(`${field}.title`, 'se esperaba una cadena');
+  if (record.tags !== undefined && (!Array.isArray(record.tags) || record.tags.some((tag) => typeof tag !== 'string'))) {
+    fail(`${field}.tags`, 'se esperaba una lista de cadenas');
+  }
+  for (const name of ['correspondent', 'documentType', 'status']) {
+    if (record[name] !== undefined && typeof record[name] !== 'string') fail(`${field}.${name}`, 'se esperaba una cadena');
+  }
+  if (record.storagePath !== undefined) {
+    const storage = requireObject(record.storagePath, `${field}.storagePath`);
+    for (const name of ['name', 'pathTemplate']) {
+      if (storage[name] !== undefined && typeof storage[name] !== 'string') fail(`${field}.storagePath.${name}`, 'se esperaba una cadena');
     }
   }
-  finish();
-  return groups;
+  return record;
 }
 
-function parseUnmatched(lines, sourceRoot, format) {
-  const { start, end } = sectionRange(lines, new RegExp(`^${escapeRegExp(format.unmatchedHeading)}$`), /^NOMBRES PDF DUPLICADOS EN .+$/, 'documentos sin coincidencia');
-  return lines.slice(start + 1, end).map(clean).filter((line) => line.startsWith(`${sourceRoot}/`));
-}
+function validateInventory(data) {
+  requireObject(data, '$');
+  if (data.schema !== 'paperless-inventory') fail('schema', 'se esperaba "paperless-inventory"');
+  if (data.version !== 1) fail('version', `versión no soportada (${String(data.version)})`);
+  if (typeof data.generatedAt !== 'string' || Number.isNaN(Date.parse(data.generatedAt))) fail('generatedAt', 'fecha-hora inválida');
+  const roots = requireObject(data.roots, 'roots');
+  for (const name of ['source', 'paperless']) {
+    requireString(requireObject(roots[name], `roots.${name}`).label, `roots.${name}.label`);
+  }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+  const summary = requireObject(data.summary, 'summary');
+  const countFields = [
+    'sourcePdfCount', 'paperlessPdfCount', 'manifestDocumentCount',
+    'paperlessDocumentsNotInSourceCount', 'manifestDocumentsWithoutPdfCount',
+    'paperlessFilesWithoutManifestCount', 'matchedSourceCount', 'unmatchedSourceCount',
+    'oneToOneGroupCount', 'manyToManyGroupCount', 'manyToManySourceCount',
+    'manyToManySameNumberGroupCount', 'manyToManyDifferentNumberGroupCount',
+    'duplicateSourceNameCount'
+  ];
+  for (const field of countFields) requireCount(summary[field], `summary.${field}`);
 
-function detectFormat(lines) {
-  const matchedLine = lines.find((line) => /^DOCUMENTOS DE .+ QUE SÍ ESTÁN EN .+$/.test(line.trim()))?.trim();
-  const matched = matchedLine?.match(/^DOCUMENTOS DE (.+) QUE SÍ ESTÁN EN (.+)$/);
-  if (!matched) throw new Error('El informe no contiene la cabecera de documentos relacionados.');
-  const sourceName = matched[1];
-  const referenceName = matched[2];
-  return {
-    sourcePrefix: `${sourceName}:`,
-    referencePrefix: `${referenceName}:`,
-    matchedHeading: matchedLine,
-    unmatchedHeading: `DOCUMENTOS DE ${sourceName} QUE NO SE ENCONTRARON EN ${referenceName}`,
-    manifestHeading: 'DOCUMENTOS DEL MANIFEST SIN PDF ORIGINAL EN EL BACKUP'
+  const sourceDocuments = requireArray(data.sourceDocuments, 'sourceDocuments');
+  const sourceByPath = new Map();
+  sourceDocuments.forEach((value, index) => {
+    const field = `sourceDocuments[${index}]`;
+    const record = requireObject(value, field);
+    const sourcePath = relativePath(record.sourcePath, `${field}.sourcePath`);
+    if (sourceByPath.has(sourcePath)) fail(`${field}.sourcePath`, `ruta duplicada (${sourcePath})`);
+    requireBoolean(record.matched, `${field}.matched`);
+    const groupIds = requireArray(record.groupIds, `${field}.groupIds`);
+    groupIds.forEach((id, itemIndex) => requireString(id, `${field}.groupIds[${itemIndex}]`));
+    sourceByPath.set(sourcePath, { ...record, sourcePath });
+  });
+
+  const groupIds = new Set();
+  const groups = requireArray(data.groups, 'groups').map((value, index) => {
+    const field = `groups[${index}]`;
+    const group = requireObject(value, field);
+    requireString(group.id, `${field}.id`);
+    if (groupIds.has(group.id)) fail(`${field}.id`, `identificador de grupo duplicado (${group.id})`);
+    groupIds.add(group.id);
+    if (!['one-to-one', 'many-to-many-same-count', 'many-to-many-different-count'].includes(group.relation)) {
+      fail(`${field}.relation`, 'relación no reconocida');
+    }
+    if (group.label !== undefined && typeof group.label !== 'string') fail(`${field}.label`, 'se esperaba una cadena');
+    const sourcePaths = requireArray(group.sourcePaths, `${field}.sourcePaths`);
+    const paperlessDocuments = requireArray(group.paperlessDocuments, `${field}.paperlessDocuments`);
+    if (!sourcePaths.length || !paperlessDocuments.length) fail(field, 'el grupo debe tener documentos de ambos lados');
+    sourcePaths.forEach((sourcePath, itemIndex) => {
+      const normalized = relativePath(sourcePath, `${field}.sourcePaths[${itemIndex}]`);
+      if (!sourceByPath.has(normalized)) fail(`${field}.sourcePaths`, `origen no declarado (${normalized})`);
+      if (!sourceByPath.get(normalized).groupIds.includes(group.id)) fail(`${field}.sourcePaths`, `falta referencia al grupo ${group.id}`);
+    });
+    paperlessDocuments.forEach((document, itemIndex) => validatePaperlessDocument(document, `${field}.paperlessDocuments[${itemIndex}]`, { physical: true }));
+    const sourceCount = sourcePaths.length;
+    const referenceCount = paperlessDocuments.length;
+    if (group.relation === 'one-to-one' && (sourceCount !== 1 || referenceCount !== 1)) fail(`${field}.relation`, 'cardinalidad uno-a-uno inconsistente');
+    if (group.relation === 'many-to-many-same-count' && (sourceCount !== referenceCount || sourceCount < 2)) fail(`${field}.relation`, 'cardinalidad varios-a-varios inconsistente');
+    if (group.relation === 'many-to-many-different-count' && sourceCount === referenceCount) fail(`${field}.relation`, 'se esperaba cardinalidad distinta');
+    return { ...group, sourcePaths };
+  });
+
+  for (const [sourcePath, document] of sourceByPath) {
+    for (const id of document.groupIds) if (!groupIds.has(id)) fail(`sourceDocuments.${sourcePath}.groupIds`, `grupo no declarado (${id})`);
+    if (document.matched !== (document.groupIds.length > 0)) fail(`sourceDocuments.${sourcePath}.matched`, 'no coincide con groupIds');
+  }
+
+  const validateList = (name, callback) => {
+    const list = requireArray(data[name], name);
+    list.forEach((item, index) => callback(item, `${name}[${index}]`));
+    return list;
   };
+  const paperlessDocuments = validateList('paperlessDocuments', (item, field) => validatePaperlessDocument(item, field, { physical: true }));
+  const notInSource = validateList('paperlessDocumentsNotInSource', (item, field) => validatePaperlessDocument(item, field, { physical: true }));
+  const manifestWithoutPdf = validateList('manifestDocumentsWithoutPdf', (item, field) => {
+    const document = validatePaperlessDocument(item, field);
+    if (document.backupPath !== undefined) fail(`${field}.backupPath`, 'no debe existir sin PDF físico');
+    if (!document.manifestPresent) fail(`${field}.manifestPresent`, 'debe estar presente en el manifest');
+  });
+  const filesWithoutManifest = validateList('paperlessFilesWithoutManifest', (item, field) => {
+    const record = requireObject(item, field);
+    relativePath(record.backupPath, `${field}.backupPath`);
+  });
+  const duplicateNames = validateList('duplicateSourceNames', (item, field) => {
+    const record = requireObject(item, field);
+    requireString(record.name, `${field}.name`);
+    const paths = requireArray(record.sourcePaths, `${field}.sourcePaths`);
+    if (paths.length < 2) fail(`${field}.sourcePaths`, 'se requieren al menos dos rutas');
+    paths.forEach((sourcePath, index) => relativePath(sourcePath, `${field}.sourcePaths[${index}]`));
+  });
+
+  const catalogs = requireObject(data.catalogs, 'catalogs');
+  for (const name of ['tags', 'correspondents', 'documentTypes', 'storagePaths']) {
+    requireArray(catalogs[name], `catalogs.${name}`).forEach((item, index) => {
+      const field = `catalogs.${name}[${index}]`;
+      const record = requireObject(item, field);
+      if (!['string', 'number'].includes(typeof record.id)) fail(`${field}.id`, 'se esperaba string o número');
+      requireString(record.name, `${field}.name`);
+      requireCount(record.documentCount, `${field}.documentCount`);
+      if (name === 'storagePaths' && record.pathTemplate !== undefined && typeof record.pathTemplate !== 'string') fail(`${field}.pathTemplate`, 'se esperaba una cadena');
+    });
+  }
+  const assertCount = (field, actual) => {
+    if (summary[field] !== actual) fail(`summary.${field}`, `el recuento no coincide con los datos (${actual})`);
+  };
+  assertCount('sourcePdfCount', sourceDocuments.length);
+  assertCount('paperlessPdfCount', paperlessDocuments.length);
+  assertCount('manifestDocumentCount', paperlessDocuments.filter((item) => item.manifestPresent).length + manifestWithoutPdf.length);
+  assertCount('paperlessDocumentsNotInSourceCount', notInSource.length);
+  assertCount('manifestDocumentsWithoutPdfCount', manifestWithoutPdf.length);
+  assertCount('paperlessFilesWithoutManifestCount', filesWithoutManifest.length);
+  assertCount('matchedSourceCount', sourceDocuments.filter((item) => item.matched).length);
+  assertCount('unmatchedSourceCount', sourceDocuments.filter((item) => !item.matched).length);
+  assertCount('oneToOneGroupCount', groups.filter((item) => item.relation === 'one-to-one').length);
+  assertCount('manyToManyGroupCount', groups.filter((item) => item.relation !== 'one-to-one').length);
+  assertCount('manyToManySourceCount', groups.filter((item) => item.relation !== 'one-to-one').reduce((sum, item) => sum + item.sourcePaths.length, 0));
+  assertCount('manyToManySameNumberGroupCount', groups.filter((item) => item.relation === 'many-to-many-same-count').length);
+  assertCount('manyToManyDifferentNumberGroupCount', groups.filter((item) => item.relation === 'many-to-many-different-count').length);
+  assertCount('duplicateSourceNameCount', duplicateNames.length);
+  return { ...data, groups };
 }
 
 function createTree(documents, sourceRoot, sourceLabel) {
@@ -114,7 +184,6 @@ function createTree(documents, sourceRoot, sourceLabel) {
   const root = { name: sourceLabel, path: sourceRoot, folders: [], documents: [] };
   const folders = new Map([[rootPath, root]]);
   for (const document of documents) {
-    if (!document.sourcePath.startsWith(rootPath)) throw new Error(`Una ruta de origen queda fuera de la carpeta declarada: ${document.sourcePath}`);
     const parts = document.sourcePath.slice(rootPath.length).split('/');
     const fileName = parts.pop();
     let currentPath = rootPath;
@@ -130,7 +199,6 @@ function createTree(documents, sourceRoot, sourceLabel) {
     }
     current.documents.push({ id: document.id, name: fileName });
   }
-
   const documentsById = new Map(documents.map((document) => [document.id, document]));
   const decorate = (folder) => {
     folder.folders.sort((left, right) => left.name.localeCompare(right.name, 'es'));
@@ -147,66 +215,67 @@ function createTree(documents, sourceRoot, sourceLabel) {
   return decorate(root);
 }
 
+function relationLabel(relation) {
+  if (relation === 'one-to-one') return '1 a 1';
+  return relation === 'many-to-many-same-count' ? 'varios a varios: mismo número' : 'varios a varios: número distinto';
+}
+
 export function parseInventory(input, options = {}) {
-  if (typeof input !== 'string' || !input.trim()) throw new Error('El informe está vacío.');
-  const lines = input.replace(/\r/g, '').split('\n');
-  const format = detectFormat(lines);
-  const sourceRoot = pathAfterHeading(lines, /^Carpeta origen(?: [^:]+)?:$/, 'la carpeta de origen');
-  const backupRoot = pathAfterHeading(lines, /^Backup de .+:$/, 'la carpeta de referencia');
-  const sourceLabel = options.sourceLabel || 'Documentos de origen';
-  const matchedGroups = parseMatchedGroups(lines, format);
-  const documents = new Map();
-
-  for (const sourcePath of parseUnmatched(lines, sourceRoot, format)) {
-    documents.set(sourcePath, { id: `doc-${documents.size + 1}`, sourcePath, found: false, ambiguous: false, relation: 'sin coincidencia', matches: [] });
+  if (typeof input !== 'string' || !input.trim()) throw new Error('El inventario está vacío.');
+  let parsed;
+  try {
+    parsed = JSON.parse(input);
+  } catch (error) {
+    throw new Error(`JSON del inventario inválido: ${error.message}`);
   }
-  for (const group of matchedGroups) {
-    for (const sourcePath of group.sourcePaths) {
-      if (!sourcePath.startsWith(`${sourceRoot}/`)) throw new Error(`Una ruta de origen queda fuera de la carpeta declarada: ${sourcePath}`);
-      for (const record of group.paperless) {
-        if (!record.path.startsWith(`${backupRoot}/`)) throw new Error(`Una ruta de referencia queda fuera de la carpeta declarada: ${record.path}`);
-      }
-      const matches = group.paperless.map((record) => ({ ...record, tags: record.tags ? [...record.tags] : undefined }));
-      const current = documents.get(sourcePath);
-      if (current) {
-        current.found = true;
-        current.matches.push(...matches);
-        current.ambiguous ||= group.sourcePaths.length > 1 || group.paperless.length > 1;
-      } else {
-        documents.set(sourcePath, {
-          id: `doc-${documents.size + 1}`,
-          sourcePath,
-          found: true,
-          ambiguous: group.sourcePaths.length > 1 || group.paperless.length > 1,
-          relation: group.relation ?? 'coincidencia registrada',
-          groupLabel: group.label,
-          matches
-        });
-      }
-    }
-  }
-
-  if (!documents.size) throw new Error('El informe no contiene documentos de origen reconocibles.');
-  const documentList = [...documents.values()].sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, 'es'));
-  const found = documentList.filter((document) => document.found).length;
-  const ambiguous = documentList.filter((document) => document.ambiguous).length;
+  const data = validateInventory(parsed);
+  const sourceRoot = '/source';
+  const backupRoot = '/backup';
+  const groupsById = new Map(data.groups.map((group) => [group.id, group]));
+  const sourceLabel = options.sourceLabel || data.roots.source.label;
+  const documents = data.sourceDocuments.map((record, index) => {
+    const groups = record.groupIds.map((id) => groupsById.get(id));
+    const matches = groups.flatMap((group) => group.paperlessDocuments.map((paperless) => ({
+      path: `${backupRoot}/${paperless.backupPath}`,
+      title: paperless.title,
+      tags: paperless.tags ? [...paperless.tags] : undefined,
+      correspondent: paperless.correspondent,
+      documentType: paperless.documentType,
+      storagePath: paperless.storagePath
+        ? [paperless.storagePath.name, paperless.storagePath.pathTemplate].filter(Boolean).join(' | ')
+        : undefined,
+      status: paperless.status
+    })));
+    const ambiguous = groups.some((group) => group.relation !== 'one-to-one') || groups.length > 1;
+    return {
+      id: `doc-${index + 1}`,
+      sourcePath: `${sourceRoot}/${record.sourcePath}`,
+      found: record.matched,
+      ambiguous,
+      relation: groups.length ? relationLabel(groups[0].relation) : 'sin coincidencia',
+      groupLabel: groups[0]?.label,
+      matches
+    };
+  }).sort((left, right) => left.sourcePath.localeCompare(right.sourcePath, 'es'));
+  const found = documents.filter((document) => document.found).length;
+  const ambiguous = documents.filter((document) => document.ambiguous).length;
   return {
     sourceRoot,
     backupRoot,
-    generatedFrom: options.generatedFrom || 'Informe local montado',
+    generatedFrom: options.generatedFrom || 'Inventario JSON local',
     display: {
       appTitle: options.appTitle || 'Dashboard Paperless',
       sourceLabel,
-      backupLabel: options.backupLabel || 'Repositorio de referencia'
+      backupLabel: options.backupLabel || data.roots.paperless.label
     },
     summary: {
-      total: documentList.length,
+      total: documents.length,
       found,
-      missing: documentList.length - found,
+      missing: documents.length - found,
       ambiguous,
-      groups: matchedGroups.filter((group) => group.sourcePaths.length > 1 || group.paperless.length > 1).length
+      groups: data.groups.filter((group) => group.relation !== 'one-to-one').length
     },
-    documents: documentList,
-    tree: createTree(documentList, sourceRoot, sourceLabel)
+    documents,
+    tree: createTree(documents, sourceRoot, sourceLabel)
   };
 }

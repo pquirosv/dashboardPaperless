@@ -1,0 +1,101 @@
+{
+  "schema": "paperless-inventory",
+  "version": 1,
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "roots": {
+    "source": { "label": "Archivo de origen" },
+    "paperless": { "label": "Exportación Paperless" }
+  },
+  "summary": {
+    "sourcePdfCount": 4,
+    "paperlessPdfCount": 3,
+    "manifestDocumentCount": 3,
+    "paperlessDocumentsNotInSourceCount": 0,
+    "manifestDocumentsWithoutPdfCount": 0,
+    "paperlessFilesWithoutManifestCount": 0,
+    "matchedSourceCount": 3,
+    "unmatchedSourceCount": 1,
+    "oneToOneGroupCount": 1,
+    "manyToManyGroupCount": 1,
+    "manyToManySourceCount": 2,
+    "manyToManySameNumberGroupCount": 1,
+    "manyToManyDifferentNumberGroupCount": 0,
+    "duplicateSourceNameCount": 0
+  },
+  "sourceDocuments": [
+    { "sourcePath": "Carpeta Única/sin coincidencia.pdf", "matched": false, "groupIds": [] },
+    { "sourcePath": "Grupo/documento uno.pdf", "matched": true, "groupIds": ["grupo-2"] },
+    { "sourcePath": "Grupo/documento dos.pdf", "matched": true, "groupIds": ["grupo-2"] },
+    { "sourcePath": "Individual/documento tres.pdf", "matched": true, "groupIds": ["grupo-1"] }
+  ],
+  "paperlessDocuments": [
+    {
+      "backupPath": "originales/referencia uno.pdf",
+      "manifestPresent": true,
+      "exportedFileName": "referencia uno.pdf",
+      "title": "Referencia uno",
+      "tags": ["contrato", "ejemplo"],
+      "correspondent": "Empresa ficticia",
+      "documentType": "Contrato",
+      "storagePath": { "name": "Ficticia", "pathTemplate": "Contratos" },
+      "status": "disponible"
+    },
+    {
+      "backupPath": "originales/referencia dos.pdf",
+      "manifestPresent": true,
+      "exportedFileName": "referencia dos.pdf",
+      "title": "Referencia dos",
+      "tags": ["ejemplo"]
+    },
+    {
+      "backupPath": "originales/referencia tres.pdf",
+      "manifestPresent": true,
+      "exportedFileName": "referencia tres.pdf",
+      "title": "Referencia tres"
+    }
+  ],
+  "groups": [
+    {
+      "id": "grupo-1",
+      "relation": "one-to-one",
+      "sourcePaths": ["Individual/documento tres.pdf"],
+      "paperlessDocuments": [{
+        "backupPath": "originales/referencia tres.pdf",
+        "manifestPresent": true,
+        "exportedFileName": "referencia tres.pdf",
+        "title": "Referencia tres"
+      }]
+    },
+    {
+      "id": "grupo-2",
+      "relation": "many-to-many-same-count",
+      "label": "agrupados.pdf",
+      "sourcePaths": ["Grupo/documento uno.pdf", "Grupo/documento dos.pdf"],
+      "paperlessDocuments": [
+        {
+          "backupPath": "originales/referencia uno.pdf",
+          "manifestPresent": true,
+          "exportedFileName": "referencia uno.pdf",
+          "title": "Referencia uno",
+          "tags": ["contrato", "ejemplo"],
+          "correspondent": "Empresa ficticia",
+          "documentType": "Contrato",
+          "storagePath": { "name": "Ficticia", "pathTemplate": "Contratos" },
+          "status": "disponible"
+        },
+        {
+          "backupPath": "originales/referencia dos.pdf",
+          "manifestPresent": true,
+          "exportedFileName": "referencia dos.pdf",
+          "title": "Referencia dos",
+          "tags": ["ejemplo"]
+        }
+      ]
+    }
+  ],
+  "paperlessDocumentsNotInSource": [],
+  "duplicateSourceNames": [],
+  "paperlessFilesWithoutManifest": [],
+  "manifestDocumentsWithoutPdf": [],
+  "catalogs": { "tags": [], "correspondents": [], "documentTypes": [], "storagePaths": [] }
+}

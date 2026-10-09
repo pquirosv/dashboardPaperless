@@ -2,6 +2,7 @@ const app = document.querySelector('#app');
 const number = new Intl.NumberFormat('es-MX');
 const state = {
   data: null,
+  runtime: { mode: 'local', version: '—' },
   selectedFolder: null,
   selectedDocument: null,
   filter: 'all',
@@ -234,7 +235,9 @@ function render() {
     <section class="workspace"><aside class="sidebar"><label class="search sidebar-search">${searchIcon}<input id="search" type="search" aria-label="Buscar documentos" placeholder="Buscar por nombre, etiqueta o corresponsal" value="${safe(state.query)}" /></label><nav class="tree" aria-label="Carpetas">${folderMarkup(tree)}</nav></aside><div class="main-view">${state.selectedDocument ? documentDetail(state.selectedDocument) : documentList(selectedFolder())}</div></section>
   </main>`;
   const tab = (view, label) => `<button class="app-tab ${state.view === view ? 'active' : ''}" data-view="${view}"${state.view === view ? ' aria-current="page"' : ''}>${label}</button>`;
-  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>${safe(state.data.display.appTitle)}</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard">${tab('archive', 'Documentos')}${tab('attributes', 'Atributos')}</nav></header>${state.view === 'attributes' ? `<main class="attributes">${attributesView()}</main>` : archiveView}<footer>Informe: ${safe(state.data.generatedFrom)}</footer>`;
+  const modeNames = { local: 'Local · Node', 'docker-local': 'Docker · código local', package: 'Docker · paquete publicado' };
+  const runtimeLabel = modeNames[state.runtime.mode] || state.runtime.mode;
+  app.innerHTML = `<header class="app-header"><div class="app-brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><div><strong>${safe(state.data.display.appTitle)}</strong><small>Inventario documental</small></div></div><nav class="app-tabs" aria-label="Vistas del dashboard">${tab('archive', 'Documentos')}${tab('attributes', 'Atributos')}</nav><div class="runtime-badge" data-mode="${safe(state.runtime.mode)}" aria-label="Entorno: ${safe(runtimeLabel)}, versión ${safe(state.runtime.version)}"><span class="runtime-dot" aria-hidden="true"></span><span>${safe(runtimeLabel)}</span><strong>v${safe(state.runtime.version)}</strong></div></header>${state.view === 'attributes' ? `<main class="attributes">${attributesView()}</main>` : archiveView}<footer>Informe: ${safe(state.data.generatedFrom)}</footer>`;
   bindEvents();
   restoreFocus(focused);
   playIntro = false;
@@ -296,11 +299,13 @@ function bindEvents() {
   document.querySelector('[data-back-to-folder]')?.addEventListener('click', () => { state.selectedDocument = null; render(); });
 }
 
-fetch('./api/inventory').then((response) => {
-  if (!response.ok) throw new Error('No se pudo cargar el inventario.');
-  return response.json();
-}).then((data) => {
+Promise.all([fetch('./api/inventory'), fetch('./api/runtime')]).then(async ([inventoryResponse, runtimeResponse]) => {
+  if (!inventoryResponse.ok) throw new Error('No se pudo cargar el inventario.');
+  if (!runtimeResponse.ok) throw new Error('No se pudo identificar el entorno de ejecución.');
+  return [await inventoryResponse.json(), await runtimeResponse.json()];
+}).then(([data, runtime]) => {
   state.data = data;
+  state.runtime = runtime;
   state.expandedFolders.add(data.tree.path);
   render();
-}).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Comprueba el informe montado y reinicia el contenedor.</p></main>`; });
+}).catch((error) => { app.innerHTML = `<main class="load-error"><h1>No se pudo cargar el dashboard</h1><p>${safe(error.message)}</p><p>Comprueba la configuración del informe y reinicia el servicio.</p></main>`; });

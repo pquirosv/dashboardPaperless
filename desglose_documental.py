@@ -3,6 +3,7 @@
 from collections import Counter, defaultdict
 from pathlib import Path
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -420,12 +421,182 @@ def write_report(out, archivo_munet, backup, munet_files, backup_files,
         p("Ninguno.")
 
 
+def relative_path(path, root):
+    """Representa un archivo bajo su raíz lógica, sin filtrar la ruta física."""
+    return path.relative_to(root).as_posix()
+
+
+def paperless_record(backup_path, document, catalogs):
+    record = {
+        "manifestPresent": document is not None,
+        "exportedFileName": document["exported_name"] if document else Path(backup_path).name,
+    }
+    if backup_path is not None:
+        record["backupPath"] = backup_path
+    if document is None:
+        return record
+
+    fields = document["fields"]
+    if fields.get("title") is not None:
+        record["title"] = fields["title"]
+    tags = [named_attribute(catalogs["documents.tag"], tag_id)
+            for tag_id in (fields.get("tags") or [])]
+    if tags:
+        record["tags"] = tags
+    for field, model, target in (
+        ("correspondent", "documents.correspondent", "correspondent"),
+        ("document_type", "documents.documenttype", "documentType"),
+    ):
+        value = named_attribute(catalogs[model], fields.get(field))
+        if value:
+            record[target] = value
+    storage_id = fields.get("storage_path")
+    storage_name = named_attribute(catalogs["documents.storagepath"], storage_id)
+    if storage_name:
+        storage_fields = catalogs["documents.storagepath"].get(storage_id)
+        record["storagePath"] = {
+            "name": storage_name,
+            "pathTemplate": ((storage_fields or {}).get("path") or "(vacía)"),
+        }
+    if fields.get("deleted_at"):
+        record["status"] = f"Eliminado el {fields['deleted_at']}"
+    return record
+
+
+def catalog_records(model, catalogs, usage):
+    result = []
+    for attribute_id, fields in sorted(
+        catalogs[model].items(),
+        key=lambda item: ((item[1].get("name") or "").lower(), item[0]),
+    ):
+        item = {
+            "id": attribute_id,
+            "name": fields.get("name") or "(sin nombre)",
+            "documentCount": usage[model][attribute_id],
+        }
+        if model == "documents.storagepath":
+            item["pathTemplate"] = fields.get("path") or "(vacía)"
+        result.append(item)
+    return result
+
+
+def build_inventory(source, backup, munet_files, backup_files, matched,
+                    unmatched, matched_one_to_one, matched_many_to_many,
+                    duplicated_munet_names, paperless_not_in_munet, catalogs,
+                    manifest_documents, documents_by_exported_name,
+                    manifest_documents_without_pdf, backup_files_without_manifest):
+    usage = referenced_attribute_ids(manifest_documents)
+    groups = []
+    source_group_ids = defaultdict(list)
+
+    def append_group(group, relation):
+        key, source_paths, backup_paths = group
+        group_id = f"group-{len(groups) + 1}"
+        paperless = []
+        for backup_path in backup_paths:
+            document = documents_by_exported_name.get(filename_key(backup_path.name))
+            paperless.append(paperless_record(
+                relative_path(backup_path, backup), document, catalogs))
+        source_relpaths = [relative_path(item, source) for item in source_paths]
+        for source_path in source_relpaths:
+            source_group_ids[source_path].append(group_id)
+        groups.append({
+            "id": group_id,
+            "relation": relation,
+            "label": Path(key).name,
+            "sourcePaths": source_relpaths,
+            "paperlessDocuments": paperless,
+        })
+
+    for group in matched_one_to_one:
+        append_group(group, "one-to-one")
+    for group in matched_many_to_many:
+        relation = ("many-to-many-same-count"
+                    if len(group[1]) == len(group[2])
+                    else "many-to-many-different-count")
+        append_group(group, relation)
+
+    source_records = []
+    for item in munet_files:
+        source_path = relative_path(item, source)
+        ids = source_group_ids[source_path]
+        source_records.append({
+            "sourcePath": source_path,
+            "matched": bool(ids),
+            "groupIds": ids,
+        })
+
+    unmatched_paths = {relative_path(item, source) for item in unmatched}
+    assert all(not source_group_ids[item] for item in unmatched_paths)
+    not_in_source = []
+    for _key, backup_path in paperless_not_in_munet:
+        document = documents_by_exported_name.get(filename_key(backup_path.name))
+        not_in_source.append(paperless_record(
+            relative_path(backup_path, backup), document, catalogs))
+
+    manifest_missing = []
+    for document in manifest_documents_without_pdf:
+        manifest_missing.append(paperless_record(None, document, catalogs))
+
+    duplicates = [
+        {"name": name, "sourcePaths": [relative_path(item, source) for item in paths]}
+        for name, paths in sorted(duplicated_munet_names.items(), key=lambda item: item[0].lower())
+    ]
+    many_same = sum(len(group[1]) == len(group[2]) for group in matched_many_to_many)
+    many_different = len(matched_many_to_many) - many_same
+    return {
+        "schema": "paperless-inventory",
+        "version": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "roots": {
+            "source": {"label": source.name},
+            "paperless": {"label": backup.name},
+        },
+        "summary": {
+            "sourcePdfCount": len(munet_files),
+            "paperlessPdfCount": len(backup_files),
+            "manifestDocumentCount": len(manifest_documents),
+            "paperlessDocumentsNotInSourceCount": len(not_in_source),
+            "manifestDocumentsWithoutPdfCount": len(manifest_documents_without_pdf),
+            "paperlessFilesWithoutManifestCount": len(backup_files_without_manifest),
+            "matchedSourceCount": len(matched),
+            "unmatchedSourceCount": len(unmatched),
+            "oneToOneGroupCount": len(matched_one_to_one),
+            "manyToManyGroupCount": len(matched_many_to_many),
+            "manyToManySourceCount": sum(len(group[1]) for group in matched_many_to_many),
+            "manyToManySameNumberGroupCount": many_same,
+            "manyToManyDifferentNumberGroupCount": many_different,
+            "duplicateSourceNameCount": len(duplicates),
+        },
+        "sourceDocuments": source_records,
+        "paperlessDocuments": [
+            paperless_record(relative_path(item, backup),
+                documents_by_exported_name.get(filename_key(item.name)), catalogs)
+            for item in backup_files
+        ],
+        "groups": groups,
+        "paperlessDocumentsNotInSource": not_in_source,
+        "duplicateSourceNames": duplicates,
+        "paperlessFilesWithoutManifest": [
+            {"backupPath": relative_path(item, backup)}
+            for item in backup_files_without_manifest
+        ],
+        "manifestDocumentsWithoutPdf": manifest_missing,
+        "catalogs": {
+            "tags": catalog_records("documents.tag", catalogs, usage),
+            "correspondents": catalog_records("documents.correspondent", catalogs, usage),
+            "documentTypes": catalog_records("documents.documenttype", catalogs, usage),
+            "storagePaths": catalog_records("documents.storagepath", catalogs, usage),
+        },
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Genera el informe para el dashboard desde una exportación de Paperless.")
     parser.add_argument("--source", default=os.environ.get("SOURCE_FILES_ROOT"), help="Carpeta de PDF de origen")
     parser.add_argument("--backup", default=os.environ.get("BACKUP_FILES_ROOT"), help="Carpeta exportada por document_exporter")
     parser.add_argument("--manifest", help="Ruta del manifest.json (por defecto, dentro de --backup)")
-    parser.add_argument("--output", default=os.environ.get("INVENTORY_OUTPUT"), help="Ruta del TXT de salida")
+    parser.add_argument("--output", default=os.environ.get("INVENTORY_OUTPUT"), help="Ruta del JSON de salida")
     parser.add_argument("--force", action="store_true", help="Reemplaza un informe ya existente")
     args = parser.parse_args()
     if not args.source or not args.backup or not args.output:
@@ -564,25 +735,15 @@ def main():
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent,
                                          prefix=".desglose-", suffix=".tmp", delete=False) as out:
             temporary_path = Path(out.name)
-            write_report(
-                out,
-                source,
-                backup,
-                munet_files,
-                backup_files,
-                matched,
-                unmatched,
-                matched_one_to_one,
-                matched_many_to_many,
-                duplicated_munet_names,
-                paperless_not_in_munet,
-                manifest,
-                catalogs,
-                manifest_documents,
-                documents_by_exported_name,
-                manifest_documents_without_pdf,
+            inventory = build_inventory(
+                source, backup, munet_files, backup_files, matched, unmatched,
+                matched_one_to_one, matched_many_to_many, duplicated_munet_names,
+                paperless_not_in_munet, catalogs, manifest_documents,
+                documents_by_exported_name, manifest_documents_without_pdf,
                 backup_files_without_manifest,
             )
+            json.dump(inventory, out, ensure_ascii=False, indent=2)
+            out.write("\n")
         if args.force:
             os.replace(temporary_path, output)
         else:
@@ -595,7 +756,7 @@ def main():
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
 
-    print("Informe generado correctamente:")
+    print("Inventario JSON generado correctamente:")
     print(output)
 
 

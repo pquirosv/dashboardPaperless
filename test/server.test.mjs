@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createDashboardServer, loadInventory, resolveUnderRoot } from '../server.mjs';
 import { checkFiles } from '../scripts/check-files.mjs';
 
-const fixture = new URL('./fixtures/sample-inventory.txt', import.meta.url);
+const fixture = new URL('./fixtures/sample-inventory-v1.json', import.meta.url);
 
 test('resolves encoded paths under the configured root and rejects traversal', () => {
   assert.equal(resolveUnderRoot('/documents/source', 'Carpeta%20%C3%9Anica/archivo.pdf'), path.resolve('/documents/source/Carpeta Única/archivo.pdf'));
   assert.equal(resolveUnderRoot('/documents/source', '%2E%2E/secret.pdf'), null);
   assert.equal(resolveUnderRoot('/documents/source', '%E0%A4%A'), null);
+  assert.equal(resolveUnderRoot('/documents/source', 'folder%2F..%2Fsecret.pdf'), null);
 });
 
 test('loads a mounted inventory and applies neutral display labels', async () => {
@@ -24,7 +25,29 @@ test('loads a mounted inventory and applies neutral display labels', async () =>
   assert.equal(data.display.appTitle, 'Visor de prueba');
   assert.equal(data.display.sourceLabel, 'Origen');
   assert.equal(data.display.backupLabel, 'Referencia');
-  assert.equal(data.generatedFrom, 'sample-inventory.txt');
+  assert.equal(data.generatedFrom, 'sample-inventory-v1.json');
+});
+
+test('selects JSON v1 directly when it exists or from the generator output directory', async (context) => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'dashboard-inventory-mode-'));
+  context.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const generatedFile = path.join(temporaryRoot, 'desglose-documentos.json');
+  await writeFile(generatedFile, await readFile(fixture, 'utf8'));
+
+  const generated = await loadInventory({ inventoryInput: temporaryRoot, inventoryExists: false });
+  assert.equal(generated.generatedFrom, 'desglose-documentos.json');
+  assert.equal(generated.summary.total, 4);
+
+  await writeFile(path.join(temporaryRoot, 'desglose-documentos.txt'), 'historical TXT must not be loaded');
+  await rm(generatedFile);
+  await assert.rejects(
+    loadInventory({ inventoryInput: temporaryRoot, inventoryExists: false }),
+    /desglose-documentos\.json.*generator/i
+  );
+
+  const existing = await loadInventory({ inventoryInput: fixture.pathname, inventoryExists: true });
+  assert.equal(existing.generatedFrom, 'sample-inventory-v1.json');
+  assert.equal(existing.summary.total, 4);
 });
 
 test('checks inventory paths against different mounted host roots', async (context) => {
@@ -53,8 +76,11 @@ test('serves inventory, health and mounted files without mutable configuration',
   await mkdir(path.join(sourceRoot, 'Grupo'), { recursive: true });
   await mkdir(backupRoot, { recursive: true });
   await writeFile(path.join(sourceRoot, 'Grupo', 'documento uno.pdf'), '%PDF-synthetic');
+  const outsidePdf = path.join(temporaryRoot, 'outside.pdf');
+  await writeFile(outsidePdf, '%PDF-outside-root');
+  await symlink(outsidePdf, path.join(sourceRoot, 'outside.pdf'));
   const inventory = await loadInventory({ inventoryFile: fixture.pathname });
-  const server = createDashboardServer({ inventory, sourceFilesRoot: sourceRoot, backupFilesRoot: backupRoot });
+  const server = createDashboardServer({ inventory, sourceFilesRoot: sourceRoot, backupFilesRoot: backupRoot, runtime: { mode: 'package', version: '1.2.0' } });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   context.after(async () => {
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
@@ -65,8 +91,12 @@ test('serves inventory, health and mounted files without mutable configuration',
 
   const health = await fetch(`${base}/api/health`);
   assert.deepEqual(await health.json(), { status: 'ok' });
+  const runtime = await fetch(`${base}/api/runtime`);
+  assert.deepEqual(await runtime.json(), { mode: 'package', version: '1.2.0' });
   const inventoryResponse = await fetch(`${base}/api/inventory`);
   assert.equal((await inventoryResponse.json()).summary.total, 4);
+  const appScript = await fetch(`${base}/app.js`);
+  assert.equal(appScript.headers.get('cache-control'), 'no-store');
   const configMutation = await fetch(`${base}/api/config`, { method: 'POST' });
   assert.equal(configMutation.status, 405);
   const pdf = await fetch(`${base}/files/source/Grupo/documento%20uno.pdf`);
@@ -74,10 +104,14 @@ test('serves inventory, health and mounted files without mutable configuration',
   assert.equal(await pdf.text(), '%PDF-synthetic');
   const traversal = await fetch(`${base}/files/source/%2E%2E/secret.pdf`);
   assert.ok([400, 404].includes(traversal.status));
+  const nonPdf = await fetch(`${base}/files/source/Grupo/documento%20uno.txt`);
+  assert.ok([400, 404].includes(nonPdf.status));
+  const symlinkTraversal = await fetch(`${base}/files/source/outside.pdf`);
+  assert.equal(symlinkTraversal.status, 404);
 });
 
 test('fails to load an inventory that does not exist', async () => {
-  await assert.rejects(loadInventory({ inventoryFile: '/definitely/missing/inventory.txt' }), /No existe INVENTORY_FILE/);
+  await assert.rejects(loadInventory({ inventoryFile: '/definitely/missing/inventory.json' }), /No existe INVENTORY_FILE/);
 });
 
 test('rejects a mounted directory in place of the inventory file', async () => {
